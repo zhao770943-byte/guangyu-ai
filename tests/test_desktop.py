@@ -19,7 +19,8 @@ class DesktopTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             exe = Path(directory) / 'GuangyuAI.exe'
             with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'executable', str(exe)), patch.dict(os.environ, {}, clear=True):
-                self.assertEqual(launcher.data_directory(), Path(directory) / 'data')
+                # Windows runners may expose TEMP with an 8.3 short-path alias.
+                self.assertEqual(launcher.data_directory(), (Path(directory) / 'data').resolve())
                 self.assertEqual(launcher.launch_command(), [str(exe), '--serve', '--no-browser'])
 
     def test_explicit_data_directory(self):
