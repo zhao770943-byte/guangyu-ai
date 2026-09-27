@@ -1,0 +1,70 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Unit checks
+        run: python -X utf8 -m unittest discover -s tests -p "test_*.py" -v
+      - name: HTTP integration checks
+        run: python -X utf8 tests/verify_v2.py
+      - name: Core regression checks
+        run: python -X utf8 tests/verify_workbench.py
+      - name: Build portable application
+        run: python -X utf8 scripts/build_windows.py
+      - name: Verify packaged runtime
+        run: python -X utf8 tests/smoke_packaged.py dist/GuangyuAI/GuangyuAI.exe
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: guangyu-ai-windows-x64
+          path: |
+            dist/GuangyuAI-v*-windows-x64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: guangyu-ai-windows-x64
+          path: release
+      - name: Publish tagged version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "光屿 AI $RELEASE_TAG" --notes-file "docs/release-$RELEASE_TAG.md" release/*
+          fi

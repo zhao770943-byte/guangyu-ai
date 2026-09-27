@@ -1,0 +1,21 @@
+# Personal state and credentials never belong in the repository.
+data/
+work/
+dist/
+build/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+.DS_Store
+Thumbs.db
