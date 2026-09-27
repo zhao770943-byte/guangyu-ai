@@ -113,7 +113,8 @@ def main():
             if result.returncode != expected:
                 log = installation / 'data' / 'service.log'
                 tail = log.read_text(encoding='utf-8')[-6000:] if log.exists() else 'No log created.'
-                raise AssertionError(f'Executable returned {result.returncode}; expected {expected}. {tail}')
+                console = (result.stdout + result.stderr).decode('utf-8', errors='replace')[-6000:]
+                raise AssertionError(f'Executable returned {result.returncode}; expected {expected}. Log: {tail}\nCaptured: {console}')
             return result
 
         def request(path, body=None):

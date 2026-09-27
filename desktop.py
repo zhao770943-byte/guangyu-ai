@@ -24,6 +24,11 @@ def main(args=None):
     args = list(sys.argv[1:] if args is None else args)
     handle = None
     try:
+        # Captured/inherited handles may use a non-Chinese Windows code page.
+        # The launcher is imported here, so its __main__ stream setup does not run.
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, 'reconfigure'):
+                stream.reconfigure(encoding='utf-8', errors='backslashreplace')
         _, _, data = launcher.configuration()
         # Set this before importing storage/server, which resolve their paths once.
         os.environ['GUANGYU_DATA'] = str(data)

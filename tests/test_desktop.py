@@ -1,5 +1,6 @@
 """Portable launcher contracts without starting a process or using user data."""
 import os
+import io
 from pathlib import Path
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import launcher
+import desktop
 
 
 class DesktopTests(unittest.TestCase):
@@ -44,6 +46,30 @@ class DesktopTests(unittest.TestCase):
     def test_unknown_option_rejected_without_network(self):
         with self.assertRaisesRegex(RuntimeError, '启动参数'):
             launcher.main(['--invalid'])
+
+    def test_captured_non_chinese_streams_use_utf8(self):
+        stdout_bytes, stderr_bytes = io.BytesIO(), io.BytesIO()
+        stdout = io.TextIOWrapper(stdout_bytes, encoding='cp1252')
+        stderr = io.TextIOWrapper(stderr_bytes, encoding='cp1252')
+
+        def successful_launcher(args):
+            self.assertEqual(args, ['--no-browser'])
+            print('光屿 AI 已运行。')
+            print('中文日志：启动成功。', file=sys.stderr)
+            return 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'GUANGYU_DATA': directory}), \
+                    patch.object(sys, 'stdout', stdout), patch.object(sys, 'stderr', stderr), \
+                    patch.object(launcher, 'main', side_effect=successful_launcher):
+                result = desktop.main(['--no-browser'])
+            stdout.flush()
+            stderr.flush()
+            self.assertEqual(result, 0)
+            self.assertIn('光屿 AI 已运行。', stdout_bytes.getvalue().decode('utf-8'))
+            self.assertIn('中文日志：启动成功。', stderr_bytes.getvalue().decode('utf-8'))
+        stdout.close()
+        stderr.close()
 
 
 if __name__ == '__main__':
