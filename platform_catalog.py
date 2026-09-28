@@ -143,6 +143,12 @@ CATALOG_TYPES={
     'together':['chat','audio','image','video'], 'fireworks':['chat','image'],
     'sambanova':['chat'], 'nvidia':['chat'], 'deepinfra':['chat','audio','image','video'],
 }
+PRESETS.insert(len(PRESETS)-1,{'id':'comfy_h3','name':'本地 MiniMax H3 / ComfyUI','base_url':'http://127.0.0.1:8188',
+                 'protocols':{'video':'comfy_h3'},'discovery_protocol':'comfy_h3','allow_local':True,
+                 'api_key_url':'http://127.0.0.1:8188','api_key_label':'打开本机 ComfyUI',
+                 'docs_url':'https://docs.comfy.org/tutorials/video/minimax/minimax-h3',
+                 'note':'无需 API Key。自动检查本机 H3 W4A8、4B ClipProj 模型与节点；首帧或首尾帧生成约 5 秒静音视频。'})
+CATALOG_TYPES['comfy_h3']=['video']
 for item in PRESETS:
     item['model_types']=CATALOG_TYPES[item['id']]
     if item['id'] in ('openai','custom'):item['protocols']['audio']='openai_speech'

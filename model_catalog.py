@@ -283,6 +283,9 @@ def discover_saved(provider):
     discovery_protocol = providers.validate_discovery_protocol(custom.get('discovery_protocol'))
     catalog_provider = {**provider, 'protocol': discovery_protocol or provider['protocol']}
     providers.validate_custom_auth(custom)
+    if provider['protocol']=='comfy_h3' or discovery_protocol=='comfy_h3' or provider.get('platform')=='comfy_h3':
+        import comfy_h3
+        return comfy_h3.discover(provider)
     family = _family(catalog_provider)
     report = {'models': [], 'source': 'api', 'base_url': provider['base_url'],
               'protocol': provider['protocol'], 'pages': 0, 'truncated': False,

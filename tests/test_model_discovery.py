@@ -551,7 +551,9 @@ class DiscoveryTests(unittest.TestCase):
             'nvidia':'build.nvidia.com', 'deepinfra':'deepinfra.com',
         }
         catalog = {item['id']: item for item in self.api('/api/platforms')['platforms']}
-        self.assertEqual(set(catalog), set(official_hosts) | {'custom'})
+        self.assertEqual(set(catalog), set(official_hosts) | {'custom','comfy_h3'})
+        self.assertEqual(catalog['comfy_h3']['api_key_url'],'http://127.0.0.1:8188')
+        self.assertEqual(catalog['comfy_h3']['api_key_label'],'打开本机 ComfyUI')
         for identity, hostname in official_hosts.items():
             with self.subTest(platform=identity):
                 item = catalog[identity]
@@ -583,7 +585,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_catalog_output_types_and_adapter_metadata(self):
         catalog={p['id']:p for p in self.api('/api/platforms')['platforms']}
-        self.assertEqual(len(catalog),24)
+        self.assertEqual(len(catalog),25)
+        self.assertEqual(catalog['comfy_h3']['model_types'],['video'])
         for identity in ('anthropic','deepseek','moonshot','cerebras','sambanova','nvidia'):
             self.assertEqual(catalog[identity]['model_types'],['chat'])
         self.assertEqual(catalog['groq']['model_types'],['chat','audio'])

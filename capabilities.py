@@ -52,6 +52,8 @@ def effective(provider):
         if 'image' in model:
             caps['aspect_ratio'] = True
             caps['resolution'] = model.startswith('gemini-3')
+    elif kind == 'video' and protocol == 'comfy_h3':
+        caps.update(first_frame=True,last_frame=True,aspect_ratio=True,seed=True)
     elif kind == 'video' and protocol == 'weijin_video':
         import weijin_video
         caps.update(aspect_ratio=True,reference_images=weijin_video.profile(provider).get('max_images',0)>0)
@@ -71,7 +73,7 @@ def mapped_controls(provider):
         return {'size': kind in ('image','video') and 'size' in used,
                 'seconds': kind == 'video' and 'seconds' in used}
     return {'size': protocol in ('openai_image','openai_video'),
-            'seconds': protocol in ('openai_video','weijin_video')}
+            'seconds': protocol in ('openai_video','weijin_video','comfy_h3')}
 
 
 def validate_custom(custom):

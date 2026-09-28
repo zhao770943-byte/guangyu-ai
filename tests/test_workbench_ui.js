@@ -14,6 +14,14 @@ vm.runInContext(fs.readFileSync(path.join(root,'public/connections.js'),'utf8'),
 vm.runInContext(fs.readFileSync(path.join(root,'public/image-controls.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
 async function run(){
+  for(const key of ['#page','#model-select','#prompt','#size-input','#seconds-input','#generation-form','#video-resolution','#video-request-preview'])elements[key]={setCustomValidity(){}};
+  vm.runInContext(`state.page='video';state.providers=[{id:'h3',kind:'video',name:'Local H3',model:'minimax-h3-local-8gb',protocol:'comfy_h3',capabilities:{first_frame:true,last_frame:true,aspect_ratio:true,seed:true},video_controls:{mode:'aspect',ratios:[{value:'16:9',label:'Landscape',enabled:true,sizes:{}}],durations:[5],duration_enabled:true,custom_duration:false,custom_size:false,default_ratio:'16:9'}}];state.drafts.video.mode='text';state.drafts.video.seconds=30;state.drafts.video.size='1920x1080';renderStudio('video');`,context);
+  assert.equal(vm.runInContext('state.drafts.video.mode',context),'first');
+  assert.equal(vm.runInContext('state.drafts.video.seconds',context),5);
+  assert.equal(vm.runInContext('state.drafts.video.size',context),'auto');
+  assert.match(elements['#page'].innerHTML,/data-mode="text"[^>]*disabled/);
+  assert.throws(()=>vm.runInContext("payloadFor('video')",context),/首帧/);
+  vm.runInContext(`state.providers=[];state.drafts.video=makeDraft();`,context);
   assert.equal(vm.runInContext("connectionMappingIssues('weijin_video','video',{}).length",context),0);
   assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{}).length",context),2);
   assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{submit_path:'https://example.com/videos',media_path:'url'})[0].field",context),'submit_path');

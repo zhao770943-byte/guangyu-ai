@@ -21,6 +21,12 @@ def sora_model(p):
 
 
 def options(p):
+    if p.get('protocol')=='comfy_h3':
+        import comfy_h3
+        return {'mode':'aspect','ratios':[{'value':r,'label':label,'sizes':{},'enabled':r in comfy_h3.SIZES} for r,label,_ in RATIOS],
+                'durations':[5],'duration_enabled':True,'custom_duration':False,'custom_size':False,'sora':'',
+                'default_ratio':'16:9','fixed_resolution':'本机低显存配置',
+                'audio_note':'本机 H3：横屏 608×352、竖屏 352×608、方形 448×448；画幅为近似比例。124 帧 / 24 FPS，实际约 5.17 秒，20 步静音生成。不返回 API Token 用量。'}
     if p.get('protocol')=='weijin_video':
         import weijin_video
         info=weijin_video.profile(p)
@@ -59,6 +65,8 @@ def validate(p,size,seconds):
         info=weijin_video.profile(p)
         if seconds not in info.get('durations_seconds',[]):raise ValueError('当前型号支持的时长为 '+ '、'.join(map(str,info.get('durations_seconds',[])))+' 秒。')
         if size!='auto':raise ValueError('维今视频请使用画幅比例，像素尺寸保持自动。')
+    if p.get('protocol')=='comfy_h3' and (seconds!=5 or size!='auto'):
+        raise ValueError('本机 H3 使用约 5 秒短片，尺寸保持自动。')
     sora=sora_model(p)
     if sora:
         if seconds not in (4,8,12,16,20):

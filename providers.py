@@ -2,7 +2,7 @@
 import base64, binascii, copy, json, re, socket, time
 import urllib.error, urllib.parse, urllib.request
 import storage, capabilities, uploads
-PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','weijin_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
+PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','weijin_video','comfy_h3','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
 MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
@@ -63,7 +63,7 @@ def validate_discovery_path(value):
 
 def validate_discovery_protocol(value):
     if value in ('',None):return ''
-    if not isinstance(value,str) or value not in ('openai_chat','anthropic','gemini','custom'):
+    if not isinstance(value,str) or value not in ('openai_chat','anthropic','gemini','comfy_h3','custom'):
         raise ValueError('模型目录协议无效。')
     return value
 
@@ -89,7 +89,7 @@ def model_constraints(identity):
             kinds=['audio']
         elif re.match(r'^(?:gpt-image-|chatgpt-image-|dall-e-)\d',model) or model in ('image-01','image-01-live'):
             kinds=['image']
-        elif re.match(r'^sora-\d',model):
+        elif re.match(r'^sora-\d',model) or model=='minimax-h3-local-8gb':
             kinds=['video']
         elif re.match(r'^gemini-\d[\w.-]*image(?:[.-]|$)',model):
             kinds=['image','chat']
@@ -135,6 +135,9 @@ def validate(p):
         if not isinstance(p.get(field),str) or not p[field].strip() or len(p[field])>maximum: raise ValueError(f'{field} 不能为空或过长。')
         p[field]=p[field].strip()
     validate_model_kind(p)
+    if p['protocol']=='comfy_h3':
+        import comfy_h3
+        comfy_h3.validate_connection(p)
     if p['protocol']=='weijin_video':
         import weijin_video
         if not weijin_video.destination(p):raise ValueError('维今视频协议的基础地址应为 https://www.weijinapi.top/v1。')
@@ -347,6 +350,10 @@ def build(p,job):
         speed=params.get('speed',1)
         if protocol=='openai_speech':path,body='/audio/speech',{'model':model,'input':prompt,'voice':voice,'speed':speed,'response_format':'wav'}
         else:path,body='/t2a_v2',{'model':model,'text':prompt,'stream':False,'output_format':'url','voice_setting':{'voice_id':voice,'speed':speed,'vol':1,'pitch':0},'audio_setting':{'format':'mp3','sample_rate':32000,'bitrate':128000,'channel':1}}
+    elif protocol=='comfy_h3':
+        import comfy_h3
+        comfy_h3.validate_job(p,job)
+        path,body='/prompt',{}
     elif protocol=='weijin_video':
         import weijin_video
         path,body='/videos',weijin_video.validate(p,job)
@@ -533,6 +540,9 @@ def poll(p,job,initial=None):
         time.sleep(10 if protocol=='weijin_video' else POLL_SECONDS);response=None
     raise ProviderError('已等待 30 分钟。平台任务 ID 已保存，请到平台核对结果，不要直接重复提交。')
 def execute(p,job,resume=False):
+    if p['protocol']=='comfy_h3':
+        import comfy_h3
+        return comfy_h3.execute(p,job,resume)
     if resume:return poll(p,job)
     if p['protocol']=='weijin_video':
         import weijin_video

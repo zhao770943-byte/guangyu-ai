@@ -18,6 +18,7 @@ const presets=[
   {id:'deepseek',name:'DeepSeek',base_url:'https://api.deepseek.com',model_types:['chat'],protocols:{chat:'openai_chat'}},
   {id:'groq',name:'Groq',base_url:'https://api.groq.com/openai/v1',model_types:['chat','audio'],protocols:{chat:'openai_chat'}},
   {id:'media',name:'Media',base_url:'https://media.example/v1',model_types:['image','video'],protocols:{}},
+  {id:'comfy_h3',name:'Local H3',base_url:'http://127.0.0.1:8188',model_types:['video'],protocols:{video:'comfy_h3'},discovery_protocol:'comfy_h3',allow_local:true},
   {id:'custom',name:'Custom',base_url:'',model_types:['chat','audio','image','video'],protocols:{}}
 ];
 function wizard(kind='',original){
@@ -60,4 +61,8 @@ edited.click('video');assert.ok(!edited.field('platform').options.includes('deep
 const legacy=wizard('video',{platform:'deepseek',kind:'video',model:'legacy',protocol:'custom',base_url:'https://proxy.example/v1',custom:{}});
 assert.equal(legacy.field('platform').value,'custom');
 assert.equal(legacy.field('base_url').value,'https://proxy.example/v1','legacy connections retain their destination');
+const local=wizard('video');local.field('platform').value='comfy_h3';local.field('platform').onchange();
+assert.equal(local.field('protocol').value,'comfy_h3');assert.equal(local.field('discovery_protocol').value,'comfy_h3');
+assert.equal(local.field('base_url').value,'http://127.0.0.1:8188');assert.equal(local.field('allow_local').checked,true);
+assert.ok(local.nodes['#connection-directory-preview'].textContent.endsWith('/object_info'));
 console.log('PASS four type filters, automatic step advance, default selection, vendor changes, key isolation and legacy editing');

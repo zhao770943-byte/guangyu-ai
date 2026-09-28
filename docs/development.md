@@ -18,6 +18,7 @@ py -3 -m venv .venv
 | --- | --- |
 | `launcher.py` | 启动／停止本应用服务并打开浏览器 |
 | `server.py` | 本机 HTTP、任务调度、同源校验、恢复与静态资源 |
+| `comfy_h3.py` | 本机 H3 工作流、节点与模型检测、素材上传、队列查询和 MP4 回存 |
 | `providers.py` | 协议请求、结果解析、轮询与用量归一化 |
 | `platform_catalog.py` | 平台 API 前缀、协议、列表方式与官方文档依据 |
 | `model_catalog.py` | 只读模型发现、分页／资源限制与保守用途建议 |
