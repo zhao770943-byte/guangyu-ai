@@ -5,9 +5,9 @@ import copy
 
 FLAGS = ('reference_images', 'first_frame', 'last_frame', 'negative_prompt', 'seed',
          'aspect_ratio', 'quality', 'batch', 'background', 'resolution', 'camera',
-         'motion', 'strength', 'audio', 'voice', 'speed')
+         'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style')
 PARAMETERS = ('negative_prompt', 'seed', 'aspect_ratio', 'quality', 'n', 'background',
-              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed')
+              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style')
 VARIABLES = {flag: ('n' if flag == 'batch' else flag) for flag in FLAGS}
 
 
@@ -41,11 +41,12 @@ def effective(provider):
     elif kind == 'image' and protocol == 'openai_image':
         # Unknown compatible models need custom mappings; no model support is guessed.
         if model.startswith('gpt-image'):
-            caps.update(reference_images=True, quality=True, batch=True, background=True)
+            caps.update(reference_images=True, quality=True, batch=True, background=True,
+                        output_format=True, output_compression=True)
         elif model == 'dall-e-2':
             caps.update(reference_images=True, batch=True)
         elif model == 'dall-e-3':
-            caps.update(quality=True)
+            caps.update(quality=True, style=True)
     elif kind == 'image' and protocol == 'gemini':
         caps['reference_images'] = True
         if 'image' in model:
@@ -82,6 +83,8 @@ def validate_custom(custom):
 
 def validate_job(provider, input_assets, parameters, size='auto'):
     import uploads
+    import image_controls
+    image_controls.validate_size(provider, size)
     if input_assets is None:
         input_assets = {}
     if parameters is None:
@@ -115,9 +118,9 @@ def validate_job(provider, input_assets, parameters, size='auto'):
         flag = 'batch' if key == 'n' else key
         if not caps[flag]:
             raise ValueError('当前连接不支持高级参数：' + key + '。请求尚未发送。')
-        if key in ('seed', 'n'):
-            maximum = 2147483647 if key == 'seed' else 10
-            if type(value) is not int or not (0 if key == 'seed' else 1) <= value <= maximum:
+        if key in ('seed', 'n', 'output_compression'):
+            maximum = 2147483647 if key == 'seed' else 100 if key == 'output_compression' else 10
+            if type(value) is not int or not (1 if key == 'n' else 0) <= value <= maximum:
                 raise ValueError(key + ' 数值无效。')
         elif key == 'speed':
             lower,upper=(0.5,2) if provider.get('protocol')=='minimax_speech' else (0.25,4)
@@ -145,6 +148,17 @@ def validate_job(provider, input_assets, parameters, size='auto'):
             raise ValueError('图像质量选项不适用于当前模型。')
         if clean.get('background', 'auto') not in ('auto', 'transparent', 'opaque'):
             raise ValueError('背景选项应为 auto、transparent 或 opaque。')
+        # Connection defaults participate in compatibility checks too.
+        effective_params = {**(provider.get('extra') or {}), **clean}
+        fmt = effective_params.get('output_format', 'png')
+        if fmt not in ('png', 'jpeg', 'webp'):
+            raise ValueError('输出格式应为 png、jpeg 或 webp。')
+        if 'output_compression' in effective_params and fmt not in ('jpeg', 'webp'):
+            raise ValueError('压缩参数仅适用于 JPEG / WebP，请先选择输出格式。')
+        if effective_params.get('background') == 'transparent' and fmt == 'jpeg':
+            raise ValueError('JPEG 不支持透明背景，请选择 PNG 或 WebP。')
+        if 'style' in clean and clean['style'] not in ('natural', 'vivid'):
+            raise ValueError('DALL·E 3 风格应为 natural 或 vivid。')
         if model == 'dall-e-2' and len(refs) > 1:
             raise ValueError('DALL·E 2 仅支持一张参考图。')
         if model == 'dall-e-2' and refs:

@@ -63,6 +63,6 @@ def update_job(identity, **fields):
         job.update(fields,updated_at=now())
         return put('jobs',job)
 def public_provider(p):
-    import capabilities, providers
-    return {**{k:v for k,v in p.items() if k!='secret'},'has_key':bool(p.get('secret')), 'capabilities':capabilities.effective(p),'mapped_controls':capabilities.mapped_controls(p),'model_constraints':providers.model_constraints(p.get('model'))}
+    import capabilities, providers, image_controls
+    return {**{k:v for k,v in p.items() if k!='secret'},'has_key':bool(p.get('secret')), 'capabilities':capabilities.effective(p),'mapped_controls':capabilities.mapped_controls(p),'model_constraints':providers.model_constraints(p.get('model')),'image_controls':image_controls.options(p)}
 def public_job(j): return {k:v for k,v in j.items() if k not in ('provider_snapshot','messages')}

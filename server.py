@@ -187,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 filename=path[7:]
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
-            static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
+            static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return
