@@ -38,6 +38,7 @@ class MediaFixture(BaseHTTPRequestHandler):
         self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
     def do_GET(self):
         self.calls.append(('GET',self.path,None))
+        if self.path=='/sample.png':return self.send(b'\x89PNG\r\n\x1a\n'+b'fixture'*12,'image/png')
         if self.path=='/sample.wav':return self.send(wav_bytes(),'audio/wav')
         self.send({'data':[{'id':name} for name in MODELS]})
     def do_POST(self):
@@ -46,7 +47,7 @@ class MediaFixture(BaseHTTPRequestHandler):
         if self.path=='/v1/audio/speech':
             return self.send(b'not audio' if body['input']=='bad-wav' else wav_bytes(),'audio/wav')
         if self.path=='/v1/image_generation':
-            return self.send({'base_resp':{'status_code':0},'data':{'image_urls':['https://example.com/fixture.png']}})
+            return self.send({'base_resp':{'status_code':0},'data':{'image_urls':[f'http://127.0.0.1:{self.server.server_port}/sample.png']}})
         if self.path=='/v1/t2a_v2':
             if body['text']=='business-error':return self.send({'base_resp':{'status_code':1008,'status_msg':'insufficient fixture balance'}})
             return self.send({'base_resp':{'status_code':0},'data':{'audio':f'http://127.0.0.1:{self.server.server_port}/sample.wav'}})
@@ -84,7 +85,7 @@ class ModelTypeTests(unittest.TestCase):
         deadline=time.monotonic()+5
         while time.monotonic()<deadline:
             j=storage.get('jobs',j['id'])
-            if j['status'] not in server.STATUS_ACTIVE:return j
+            if j['status'] not in server.STATUS_ACTIVE and j.get('archive_status')!='pending':return j
             time.sleep(.02)
         self.fail('Fixture job timed out')
     def test_directory_keeps_output_type_separate_from_adapter(self):
@@ -122,11 +123,11 @@ class ModelTypeTests(unittest.TestCase):
     def test_minimax_speech_native_body_and_audio_result(self):
         j=self.job(self.config(protocol='minimax_speech',model='speech-02-hd'),parameters={'voice':'male-qn-qingse','speed':.8})
         self.assertEqual(j['status'],'succeeded',j.get('error'));self.assertEqual(j['result']['assets'][0]['type'],'audio')
-        call=MediaFixture.calls[-1];self.assertEqual(call[1],'/v1/t2a_v2');self.assertEqual(call[2]['voice_setting']['speed'],.8)
+        call=[c for c in MediaFixture.calls if c[0]=='POST'][-1];self.assertEqual(call[1],'/v1/t2a_v2');self.assertEqual(call[2]['voice_setting']['speed'],.8)
         self.assertEqual(call[2]['output_format'],'url')
     def test_minimax_image_native_path(self):
         j=self.job(self.config(kind='image',protocol='minimax_image',model='image-01'),parameters={'aspect_ratio':'16:9','n':2})
-        self.assertEqual(j['status'],'succeeded',j.get('error'));self.assertEqual(MediaFixture.calls[-1][1],'/v1/image_generation')
+        self.assertEqual(j['status'],'succeeded',j.get('error'));self.assertEqual([c for c in MediaFixture.calls if c[0]=='POST'][-1][1],'/v1/image_generation')
         self.assertEqual(j['result']['assets'][0]['type'],'image')
     def test_minimax_business_failure_is_not_success_or_retried(self):
         j=self.job(self.config(protocol='minimax_speech',model='speech-02-hd'),prompt='business-error')

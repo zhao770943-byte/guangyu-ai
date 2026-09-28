@@ -4,10 +4,10 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
-import providers, storage, capabilities, uploads, usage, model_catalog
+import providers, storage, capabilities, uploads, usage, model_catalog, media_store
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '2.3.0'
+VERSION = '2.3.1'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)
@@ -27,7 +27,10 @@ def run_job(identity,resume=False):
         if job.get('conversation_id'):
             with storage.LOCK:
                 conv=storage.get('conversations',job['conversation_id']);conv['messages'].append({'role':'assistant','content':result['text'],'job_id':identity});conv['updated_at']=storage.now();storage.put('conversations',conv)
-        storage.update_job(identity,status='succeeded',result=result,error='',usage=result.get('usage',job.get('usage')),response_model=result.get('response_model'),response_id=result.get('response_id'),**timing())
+        assets=result.get('assets',[])
+        archive_status=('pending' if any(not a.get('local') for a in assets) else 'saved') if assets else None
+        storage.update_job(identity,status='succeeded',result=result,error='',archive_status=archive_status,usage=result.get('usage',job.get('usage')),response_model=result.get('response_model'),response_id=result.get('response_id'),**timing())
+        if archive_status=='pending':run_archive(identity,release=False)
     except providers.ProviderError as ex:storage.update_job(identity,status='interrupted' if ex.uncertain else 'failed',error=providers.clean_error(str(ex),p),**timing())
     except Exception:storage.update_job(identity,status='failed',error='处理响应时发生错误。请核对协议、模型及字段映射；如平台已接受请求，请先核对用量。',**timing())
     finally:
@@ -37,10 +40,34 @@ def dispatch(job,resume=False):
     with ACTIVE_LOCK:
         ACTIVE.add(job['id']);POOL.submit(run_job,job['id'],resume)
 
+def run_archive(identity,release=True):
+    try:media_store.archive(identity)
+    except Exception:
+        # The generation receipt is already durable, even if saving fails.
+        storage.update_job(identity,archive_status='failed')
+    finally:
+        if release:
+            with ACTIVE_LOCK:ACTIVE.discard(identity)
+
+def dispatch_archive(job):
+    with ACTIVE_LOCK:
+        if job['id'] in ACTIVE:return storage.get('jobs',job['id'])
+        if len(ACTIVE)>=12:raise ValueError('当前任务较多，请稍后重试保存。')
+        job=storage.update_job(job['id'],archive_status='pending')
+        ACTIVE.add(job['id']);POOL.submit(run_archive,job['id'])
+        return job
+
 def recover():
     for job in storage.items('jobs',10000):
         if job['status']=='polling' and job.get('upstream_id'):dispatch(job,resume=True)
         elif job['status'] in STATUS_ACTIVE:storage.update_job(job['id'],status='interrupted',finished_at=storage.now(),error='上次运行被中断。未自动重新提交，以免重复计费；请先在平台核对任务。')
+        elif job['status']=='succeeded' and job.get('result',{}).get('assets') and job.get('archive_status') in (None,'pending'):
+            # GET-only recovery also migrates previously saved temporary URLs.
+            if all(a.get('local') for a in job['result']['assets']):storage.update_job(job['id'],archive_status='saved')
+            else:
+                # Queue migration without the interactive submission cap.
+                with ACTIVE_LOCK:
+                    storage.update_job(job['id'],archive_status='pending');ACTIVE.add(job['id']);POOL.submit(run_archive,job['id'])
 
 ASSISTANT_SYSTEM = '''你是光屿 AI 网页创作工作台的助手。请用清晰的中文协助用户答疑、设计图像和视频提示词、拆解分镜，以及理解接口配置、模型能力和本页用量。
 此工作台在用户电脑本机运行，包含图像工作台、视频工作台、网页 AI 助手、模型连接和用量统计。你无法读取 API 密钥，无法自动调用生图或生视频工具，也不能修改网页配置。涉及生成、修改提示词或切换参数时，只给可供用户采纳的建议；不要声称已执行。用户需自行点击采用建议、发送或生成。
@@ -134,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.guard():return
         try:
             path=urlsplit(self.path).path
-            if path=='/api/bootstrap':return self.json_response({'csrf':CSRF,'providers':[storage.public_provider(p) for p in storage.items('providers')],'jobs':[storage.public_job(j) for j in storage.items('jobs')],'conversations':storage.items('conversations'),'version':VERSION})
+            if path=='/api/bootstrap':return self.json_response({'csrf':CSRF,'providers':[storage.public_provider(p) for p in storage.items('providers')],'jobs':[storage.public_job(j) for j in storage.items('jobs',-1)],'conversations':storage.items('conversations'),'version':VERSION})
             if path=='/api/platforms':
                 import platform_catalog
                 return self.json_response({'platforms':platform_catalog.list_presets()})
@@ -145,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
                 if csv_requested:
                     raw=usage.csv_export(report).encode('utf-8');self.send_headers(200,'text/csv; charset=utf-8',len(raw),{'Content-Disposition':'attachment; filename="guangyu-usage.csv"'});self.wfile.write(raw);return
                 return self.json_response(report)
-            if path=='/api/jobs':return self.json_response({'jobs':[storage.public_job(j) for j in storage.items('jobs')]})
+            if path=='/api/jobs':return self.json_response({'jobs':[storage.public_job(j) for j in storage.items('jobs',-1)]})
             if path.startswith('/api/jobs/'):
                 job=storage.get('jobs',path.rsplit('/',1)[-1]);return self.json_response(storage.public_job(job) if job else {'error':'任务不存在。'},200 if job else 404)
             if path=='/api/conversations':return self.json_response({'conversations':storage.items('conversations')})
@@ -158,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_file(storage.DATA/'uploads'/filename)
             if path.startswith('/media/'):
                 filename=path[7:]
-                if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|wav)',filename):return self.json_response({'error':'文件不存在。'},404)
+                if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
             static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             if path in static:return self.serve_file(ROOT/'public'/static[path])
@@ -204,6 +231,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not p:raise ValueError('连接不存在。')
                 return self.json_response({'models':providers.models(p)})
             if self.path=='/api/jobs':return self.json_response(create_job(body),202)
+            if self.path=='/api/jobs/archive':
+                job=storage.get('jobs',body.get('id',''))
+                if not job or job['status']!='succeeded' or not job.get('result',{}).get('assets'):raise ValueError('没有可保存的作品。')
+                if all(a.get('local') for a in job['result']['assets']):return self.json_response(storage.public_job(job))
+                return self.json_response(storage.public_job(dispatch_archive(job)))
             if self.path=='/api/jobs/resume':
                 with ACTIVE_LOCK:
                     job=storage.get('jobs',body.get('id',''))
@@ -214,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_response(storage.public_job(job))
             if self.path=='/api/shutdown':
                 with ACTIVE_LOCK:
-                    if ACTIVE:raise ValueError('仍有生成任务正在运行，请等待完成后再关闭。')
+                    if ACTIVE:raise ValueError('仍有生成或作品保存任务正在运行，请等待完成后再关闭。')
                     self.json_response({'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             return self.json_response({'error':'接口不存在。'},404)
         except (ValueError,TypeError) as ex:return self.json_response({'error':str(ex)[:1000]},400)

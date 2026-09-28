@@ -51,6 +51,8 @@ class Fixture(BaseHTTPRequestHandler):
 
     def do_GET(self):
         UPSTREAM_CALLS.append(('GET', self.path))
+        if self.path=='/fixture.png':
+            self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(PNG)));self.end_headers();self.wfile.write(PNG);return
         if self.path == '/v1/models':
             AUTHENTICATED.append(self.headers.get('Authorization') == 'Bearer ' + KEY)
             return self.send({'data': [{'id': 'local-fixture-model'}, {'id': 'gpt-image-1'}]})
@@ -61,6 +63,7 @@ class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         UPSTREAM_CALLS.append(('POST', self.path))
         self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path=='/v1/images/generations':return self.send({'data':[{'url':f'http://127.0.0.1:{self.server.server_port}/fixture.png'}]})
         if self.path == '/v1/audio/speech':
             raw=fixture_wav();self.send_response(200);self.send_header('Content-Type','audio/wav')
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
@@ -231,6 +234,19 @@ def main():
             check(report['summary']['audio_count']==1 and audio_job['usage']['total_tokens'] is None
                   and UPSTREAM_CALLS.count(('POST','/v1/audio/speech'))==1,
                   'Packaged audio counts outputs, preserves unknown tokens and submits once')
+            image_provider=request('/api/providers/save',{'name':'Packaged remote image','kind':'image','protocol':'openai_image','model':'gpt-image-1','base_url':f'http://127.0.0.1:{fixture.server_port}/v1','allow_local':True})
+            image_job=request('/api/jobs',{'provider_id':image_provider['id'],'prompt':'Fixture saved image'})
+            for _ in range(100):
+                image_job=request('/api/jobs/'+image_job['id'])
+                if image_job.get('archive_status')=='saved':break
+                time.sleep(.1)
+            asset=image_job.get('result',{}).get('assets',[{}])[0]
+            check(image_job.get('archive_status')=='saved' and asset.get('local') and request(asset['url'])==PNG,
+                  'Packaged remote media is archived as an original local file')
+            run('--stop');run();csrf=request('/api/bootstrap')['csrf']
+            check(request('/api/jobs/'+image_job['id'])['archive_status']=='saved' and request(asset['url'])==PNG
+                  and UPSTREAM_CALLS.count(('POST','/v1/images/generations'))==1,
+                  'Packaged works library survives restart without another generation')
             run('--stop')
             alternate['GUANGYU_PORT'] = str(port)
             run(env=alternate)
