@@ -17,6 +17,7 @@ MP4=b'\x00\x00\x00\x18ftypisom'+b'fixture-video-content'*8
 class Fixture(BaseHTTPRequestHandler):
     calls=[]
     catalog=[MODEL]
+    poll_response=None
     def log_message(self,*args):pass
     def reply(self,body,code=200,headers=None):
         raw=json.dumps(body).encode() if isinstance(body,dict) else body
@@ -28,6 +29,7 @@ class Fixture(BaseHTTPRequestHandler):
         if self.path=='/v1/models':return self.reply({'data':self.catalog})
         if self.path.endswith('/content'):return self.reply(b'',307,{'Location':f'http://127.0.0.1:{self.server.server_port}/cdn.mp4'})
         if self.path=='/cdn.mp4':return self.reply(MP4)
+        if self.poll_response is not None:return self.reply(self.poll_response)
         return self.reply({'id':'task_fixture','status':'completed'})
     def do_POST(self):
         raw=self.rfile.read(int(self.headers['Content-Length']))
@@ -41,7 +43,7 @@ class WeijinTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.data=patch.object(storage,'DATA',Path(self.temp.name));self.data.start();self.addCleanup(self.data.stop);storage.init()
         self.app=ThreadingHTTPServer(('127.0.0.1',0),Fixture);threading.Thread(target=self.app.serve_forever,daemon=True).start()
-        self.addCleanup(self.app.server_close);self.addCleanup(self.app.shutdown);Fixture.calls=[];Fixture.catalog=[MODEL]
+        self.addCleanup(self.app.server_close);self.addCleanup(self.app.shutdown);Fixture.calls=[];Fixture.catalog=[MODEL];Fixture.poll_response=None
         self.p={'name':'fixture','kind':'video','protocol':'weijin_video','model':MODEL['id'],
                 'base_url':f'http://127.0.0.1:{self.app.server_port}/v1','allow_local':True,
                 'secret':storage.crypt('fixture-key'),'extra':{},'video_model_metadata':MODEL}
@@ -67,6 +69,18 @@ class WeijinTests(unittest.TestCase):
         self.job['seconds']=4
         with self.assertRaisesRegex(ValueError,'30'):providers.build(self.p,self.job)
         self.assertEqual(Fixture.calls,[])
+
+    def test_terminal_error_body_keeps_platform_failure_and_does_not_resubmit(self):
+        import server
+        Fixture.poll_response={'id':'task_fixture','status':'failed','progress':0,
+                               'error':{'code':'generation_failed','message':'视频生成失败，请凭任务编号联系客服'}}
+        storage.update_job(self.job['id'],upstream_id='task_fixture',upstream_status='in_progress',progress=34)
+        server.run_job(self.job['id'],resume=True)
+        job=storage.get('jobs',self.job['id'])
+        self.assertEqual(job['status'],'failed');self.assertEqual(job['upstream_status'],'failed')
+        self.assertEqual(job['progress'],0);self.assertEqual(job['error_code'],'generation_failed')
+        self.assertEqual(job['error'],'视频生成失败，请凭任务编号联系客服')
+        self.assertEqual([(c[0],c[1]) for c in Fixture.calls],[('GET','/v1/videos/task_fixture')])
 
     def test_live_capability_mismatch_stops_before_post(self):
         with patch.object(weijin_video,'metadata',return_value={'durations_seconds':[15],'ratios':['16:9'],'max_images':0,'resolution':'720p'}):

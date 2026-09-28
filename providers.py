@@ -228,7 +228,12 @@ def request(p,path,payload=None,multipart=False,binary=False):
         try: result=json.loads(raw)
         except (ValueError,UnicodeDecodeError): raise ProviderError('接口未返回 JSON，请核对基础地址和协议。')
         if not isinstance(result,dict): raise ProviderError('接口响应必须为 JSON 对象。')
-        if result.get('error'): raise ProviderError(clean_error(json.dumps(result['error'],ensure_ascii=False),p),response=result)
+        if result.get('error'):
+            error=result['error'];code=error.get('code') if isinstance(error,dict) else None
+            detail=error.get('message') if isinstance(error,dict) else error
+            detail=detail or json.dumps(error,ensure_ascii=False)
+            raise ProviderError(clean_error(str(detail),p),response=result,
+                                code=clean_error(str(code),p) if code is not None else None)
         return result
     except urllib.error.HTTPError as ex:
         if 300<=ex.code<400: raise ProviderError('接口返回重定向；为避免密钥外泄未跟随。请填写最终 API 地址。')
@@ -506,7 +511,12 @@ def poll(p,job,initial=None):
             try:
                 response=request(p,path);retries=0
             except ProviderError as ex:
-                if ex.response:record_response(p,job['id'],ex.response)
+                if ex.response:
+                    record_response(p,job['id'],ex.response)
+                    failed_status=dig(ex.response,status_path)
+                    if failed_status is not None and str(failed_status).lower() in failure:
+                        storage.update_job(job['id'],upstream_status=str(failed_status).lower()[:80],
+                                           progress=ex.response.get('progress') if type(ex.response.get('progress')) in (int,float) else None)
                 if ex.retryable and retries<5:
                     retries+=1;storage.update_job(job['id'],upstream_status='retrying');time.sleep(min(2**retries,15));continue
                 raise
