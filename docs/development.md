@@ -41,6 +41,16 @@ py -3 -m venv .venv
 
 测试使用内置微型视频、本机模拟服务与临时数据，不要求 ffmpeg 或真实模型密钥。具体覆盖和限制见 [验收记录](../验收记录.md)。
 
+前端交互回归（离线状态与 DOM 契约，不代表浏览器视觉验收）：
+
+```powershell
+node tests/test_workbench_ui.js
+node tests/test_connection_wizard.js
+node tests/test_storyboards_ui.js
+node tests/test_storyboards_form.js
+node tests/test_library_picker.js
+```
+
 ## Windows 便携构建
 
 在 Windows x64 上执行：

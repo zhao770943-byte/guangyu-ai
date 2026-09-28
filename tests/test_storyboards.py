@@ -63,6 +63,34 @@ class StoryboardTests(unittest.TestCase):
         b=self.generate(self.board());self.finish(b['master_job_id'])
         return self.api('/api/storyboards/confirm',{'id':b['id'],'version':b['version']})
 
+    def test_library_selects_exact_asset_and_preserves_copy_when_work_deleted(self):
+        b=self.generate(self.board());identity=b['master_job_id'];self.finish(identity)
+        j=storage.get('jobs',identity)
+        name=storage.uid()+'.png';Image.new('RGB',(120,80),'red').save(storage.DATA/'media'/name)
+        j['result']['assets'].append({'type':'image','url':'/media/'+name,'local':True})
+        storage.put('jobs',j);calls=self.mock_dispatch.call_count
+        a=self.api('/api/library/image',{'job_id':identity,'asset_index':1})
+        self.assertEqual((a['width'],a['height']),(120,80))
+        self.assertEqual(self.mock_dispatch.call_count,calls)
+        self.assertNotIn('filename',a)
+        self.api('/api/jobs/delete',{'id':identity})
+        self.assertEqual(uploads.get(a['id'])['width'],120)
+        self.api('/api/library/image',{'job_id':identity,'asset_index':1},400)
+
+    def test_library_rejects_invalid_or_unavailable_images_without_dispatch(self):
+        b=self.generate(self.board());identity=b['master_job_id']
+        self.api('/api/library/image',{'job_id':identity,'asset_index':0},400)
+        self.finish(identity);calls=self.mock_dispatch.call_count
+        for index in (-1,2,True,'0',None):
+            self.api('/api/library/image',{'job_id':identity,'asset_index':index},400)
+        self.api('/api/library/image',{'job_id':identity},400)
+        for asset in ({'type':'image','local':False,'url':'https://example.invalid/a.png'},
+                      {'type':'video','local':True,'url':'/media/a.mp4'},
+                      {'type':'image','local':True,'url':'/media/../../private.png'}):
+            storage.update_job(identity,result={'assets':[asset]})
+            self.api('/api/library/image',{'job_id':identity,'asset_index':0},400)
+        self.assertEqual(self.mock_dispatch.call_count,calls)
+
     def test_full_flow_reference_is_shared_batch_atomic_and_video_not_generated(self):
         b=self.confirmed();master=b['master_asset'];b=self.generate(b,'shots')
         shotjobs=[storage.get('jobs',s['job_id']) for s in b['shots']]

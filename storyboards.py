@@ -81,14 +81,27 @@ def save(body):
         return public(board)
 
 
-def image_from_job(identity):
+def image_from_job(identity,asset_index=None):
     job=storage.get('jobs',identity) if isinstance(identity,str) else None
     if not job or job['kind']!='image' or job['status']!='succeeded' or job.get('work_deleted_at'):raise ValueError('这张图片尚未生成成功或已删除。')
-    asset=next((a for a in job.get('result',{}).get('assets',[]) if a.get('type')=='image' and a.get('local')),None)
+    assets=job.get('result',{}).get('assets',[])
+    if asset_index is None:
+        asset=next((a for a in assets if a.get('type')=='image' and a.get('local')),None)
+    else:
+        if type(asset_index) is not int or not 0<=asset_index<len(assets):raise ValueError('请选择有效的作品图片。')
+        asset=assets[asset_index]
+        if asset.get('type')!='image' or not asset.get('local'):raise ValueError('请选择已保存到本机的图片。')
     if not asset:raise ValueError('图片尚未保存到本机，请等待保存完成，或在作品库重试保存原图。')
     path=work_library.local_path(asset['url'])
     if not path.is_file() or path.stat().st_size>uploads.MAX_BYTES:raise ValueError('图片不存在或超过参考图的 10 MiB 上限，请换用较小图片。')
     return uploads.save({'name':'分镜素材-'+identity[:8]+path.suffix,'data_base64':base64.b64encode(path.read_bytes()).decode()})
+
+
+def library_image(body):
+    # Copy verified server-owned media; never accept arbitrary paths or remote URLs.
+    if type(body.get('asset_index')) is not int:raise ValueError('请选择作品中的具体图片。')
+    with storage.LOCK:
+        return image_from_job(body.get('job_id'),body['asset_index'])
 
 
 def confirm(body,active_lock):

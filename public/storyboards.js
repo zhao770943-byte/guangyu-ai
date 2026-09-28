@@ -1,5 +1,5 @@
 'use strict';
-const storyboardView={open:false,board:null,projects:[],busy:false,dirty:false,loading:false,pending:null,error:'',transfers:{}};
+const storyboardView={open:false,stage:'master',activeShot:null,board:null,projects:[],busy:false,dirty:false,loading:false,pending:null,error:'',transfers:{}};
 const storyboardDefaults=[
  ['环境与出场','建立故事环境，以全景或全身构图呈现主角和关键穿搭、道具。选择故事开始时的一个自然静态瞬间，为后续动作留出空间。'],
  ['主要动作','根据脚本选择主角即将开始核心动作的瞬间。中景或半身构图，手部、关键道具与视线关系清晰，不要在一张图里表现多个动作。'],
@@ -15,27 +15,28 @@ function sbMerge(board){for(const j of board.jobs||[]){state.jobs=state.jobs.fil
 async function sbOpen(){storyboardView.open=true;renderStudio('video')}
 async function sbLoad(id){
  storyboardView.loading=true;storyboardView.error='';renderStoryboards();
- try{storyboardView.projects=(await api('/api/storyboards')).boards;const chosenId=id||storyboardView.projects[0]?.id;sbMerge(chosenId?await api('/api/storyboards?id='+encodeURIComponent(chosenId)):sbFresh());storyboardView.dirty=false;storyboardView.pending=null}
+ try{storyboardView.projects=(await api('/api/storyboards')).boards;const chosenId=id||storyboardView.projects[0]?.id;sbMerge(chosenId?await api('/api/storyboards?id='+encodeURIComponent(chosenId)):sbFresh());storyboardView.dirty=false;storyboardView.pending=null;storyboardView.stage=storyboardView.board.master_upload_id?'shots':'master'}
  catch(err){storyboardView.error=err.message}
  finally{storyboardView.loading=false;if(storyboardView.open&&state.page==='video')renderStoryboards()}
 }
 function renderStoryboards(){
  const v=storyboardView,b=v.board;
- $('#page').innerHTML=heading('分镜准备','先确认一张视觉定稿，再让每个镜头围绕同一人物、服装和场景展开。',`<button class="button secondary" id="sb-close">${icon('video')} 返回视频生成</button>`,'video')+`<section class="panel sb-project-bar"><label>本机项目<select id="sb-project"><option value="">${b&&!b.id?'未保存的新项目':'选择项目'}</option>${v.projects.map(p=>`<option value="${p.id}" ${p.id===b?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select></label><button class="button secondary" id="sb-new">${icon('plus')} 新建项目</button><button class="button secondary" id="sb-reload">重新载入</button><span id="sb-save-note">${v.dirty?'有未保存的修改':'项目保存在本机'}</span><button class="button primary" id="sb-save" ${!b?'disabled':''}>保存项目</button></section><p id="sb-error" class="sb-error" role="alert" ${v.error?'':'hidden'}>${esc(v.error)}</p>`;
+ $('#page').innerHTML=heading('定稿图与分镜','从一张定稿到一组镜头，在同一个项目里完成视觉准备。',`<button class="button secondary" id="sb-close">${icon('video')} 返回视频生成</button>`,'video')+(typeof videoWorkflow==='function'?videoWorkflow('storyboards'):'')+`<section class="panel sb-project-bar"><label>本机项目<select id="sb-project"><option value="">${b&&!b.id?'未保存的新项目':'选择项目'}</option>${v.projects.map(p=>`<option value="${p.id}" ${p.id===b?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select></label><button class="button secondary" id="sb-new">${icon('plus')} 新建项目</button><button class="button secondary" id="sb-reload">重新载入</button><span id="sb-save-note">${v.dirty?'有未保存的修改':b&&!b.id?'新项目尚未保存':'项目保存在本机'}</span><button class="button primary" id="sb-save" ${!b?'disabled':''}>保存项目</button></section><p id="sb-error" class="sb-error" role="alert" ${v.error?'':'hidden'}>${esc(v.error)}</p>`;
  $('#sb-close').onclick=async()=>{if(v.dirty&&!await confirmAction('暂不保存分镜修改？','项目的未保存修改仍留在当前页面会话中；刷新页面将丢失这些修改。'))return;v.open=false;renderStudio('video')};
- $('#sb-new').onclick=async()=>{if(v.dirty&&!await confirmAction('新建分镜项目？','当前未保存的修改将被放弃。'))return;v.board=sbFresh();v.dirty=true;v.pending=null;renderStoryboards()};
+ $('#sb-new').onclick=async()=>{if(v.dirty&&!await confirmAction('新建分镜项目？','当前未保存的修改将被放弃。'))return;v.board=sbFresh();v.stage='master';v.activeShot=null;v.dirty=true;v.pending=null;renderStoryboards()};
  $('#sb-reload').onclick=async()=>{if(v.dirty&&!await confirmAction('重新载入项目？','当前未保存的修改将被放弃。'))return;sbLoad(b?.id)};
  $('#sb-project').onchange=async e=>{const id=e.target.value;if(!id)return;if(v.dirty&&!await confirmAction('切换项目？','当前未保存的修改将被放弃。')){e.target.value=b?.id||'';return}sbLoad(id)};
  if(!b||v.loading){$('#page').insertAdjacentHTML('beforeend',`<section class="panel sb-loading">${v.loading?'正在读取分镜项目…':'尚未读取项目'}</section>`);if(!v.loading&&!v.error)sbLoad();return}
  const images=state.providers.filter(p=>p.kind==='image'&&providerUsable(p));
- $('#page').insertAdjacentHTML('beforeend',`<div class="sb-layout"><section class="panel sb-brief"><div class="sb-section-title"><span>01</span><div><h2>创意与定稿</h2><p>先固定人物和视觉风格，再决定镜头。</p></div></div><label>项目名称<input id="sb-title" maxlength="80" value="${esc(b.title)}"></label><label>图像模型<select id="sb-provider">${images.length?images.map(p=>`<option value="${p.id}" ${p.id===b.provider_id?'selected':''}>${esc(p.name)} · ${p.capabilities.reference_images?'支持参考图':'不支持参考图'}</option>`).join(''):'<option value="">请先接入图像模型</option>'}</select></label><p id="sb-capability" class="field-hint"></p><label>整段创意 / 视频脚本<textarea id="sb-story" rows="7" maxlength="16000" placeholder="粘贴完整创意，包括人物、服装、环境与动作顺序。生成定稿图时会提炼为一个静态画面。">${esc(b.story)}</textarea></label><label>定稿图补充要求<textarea id="sb-master-prompt" rows="3" maxlength="6000" placeholder="例如：完整全身、服装和包清晰可辨；这里的要求也会传给每个分镜。">${esc(b.master_prompt)}</textarea></label><label>画幅<select id="sb-ratio">${['9:16','16:9','1:1','3:2','2:3','4:3','3:4'].map(r=>`<option ${b.ratio===r?'selected':''}>${r}</option>`).join('')}</select></label><p class="field-hint">支持比例参数的接口会直接传入；其他接口写入提示词，像素尺寸使用模型默认值。</p><button class="button primary wide" id="sb-master-generate">${icon('image')} ${b.master_job_id?'重新生成定稿图':'生成 1 张定稿图'}</button><p class="field-hint">调用上方图像模型。每次生成均按你的平台账户计费。</p></section><section class="panel sb-master"><div class="sb-section-title"><span>02</span><div><h2>确认定稿图</h2><p>全部分镜共用这张参考图，减少人物和服饰变化。</p></div></div><div id="sb-master-result"></div><button class="button primary wide" id="sb-confirm">确认此图，作为共同参考</button><p class="field-hint">重新生成并确认定稿图后，当前分镜结果关联会重置；旧作品仍在作品库。</p></section></div><section class="panel sb-shots"><div class="sb-shots-heading"><div class="sb-section-title"><span>03</span><div><h2>分镜安排</h2><p>先按镜头顺序修改描述。每张独立生成，不合成多宫格。</p></div></div><div class="sb-actions"><button class="button secondary" id="sb-add-shot">${icon('plus')} 添加镜头</button><button class="button primary" id="sb-generate-shots">${icon('spark')} 同时生成 ${b.shots.length} 张分镜</button></div></div><p class="sb-queue-note">一键提交全部镜头 · 最多 3 个任务并发，其余排队 · 失败镜头可单独重做 · 不自动生成视频</p><div class="sb-shot-grid">${b.shots.map((s,i)=>`<article class="sb-shot"><div class="sb-shot-top"><b>镜头 ${String(i+1).padStart(2,'0')}</b><button type="button" class="text-button" data-sb-remove="${s.id}">移除</button></div><label class="sr-only" for="sb-title-${s.id}">镜头 ${i+1} 标题</label><input id="sb-title-${s.id}" data-sb-title="${s.id}" value="${esc(s.title)}" maxlength="80"><label class="sr-only" for="sb-prompt-${s.id}">镜头 ${i+1} 描述</label><textarea id="sb-prompt-${s.id}" data-sb-prompt="${s.id}" rows="4" maxlength="4000">${esc(s.prompt)}</textarea><div id="sb-result-${s.id}"></div></article>`).join('')}</div></section>`);
+ $('#page').insertAdjacentHTML('beforeend',sbLayout(b,images));
+ sbBindLayout();
  for(const [id,key] of [['sb-title','title'],['sb-provider','provider_id'],['sb-story','story'],['sb-master-prompt','master_prompt'],['sb-ratio','ratio']])$('#'+id).oninput=e=>{b[key]=e.target.value;sbDirty();sbUpdateResults()};
- document.querySelectorAll('[data-sb-title],[data-sb-prompt]').forEach(e=>e.oninput=()=>{const s=b.shots.find(s=>s.id===(e.dataset.sbTitle||e.dataset.sbPrompt));s[e.dataset.sbTitle?'title':'prompt']=e.value;sbDirty()});
+ document.querySelectorAll('[data-sb-title],[data-sb-prompt]').forEach(e=>e.oninput=()=>{const s=b.shots.find(s=>s.id===(e.dataset.sbTitle||e.dataset.sbPrompt));s[e.dataset.sbTitle?'title':'prompt']=e.value;sbDirty();if(e.dataset.sbTitle)sbUpdateFilmstrip()});
  document.querySelectorAll('[data-sb-remove]').forEach(e=>e.onclick=()=>{if(b.shots.length===1)return toast('至少保留一个镜头');b.shots=b.shots.filter(s=>s.id!==e.dataset.sbRemove);sbDirty();renderStoryboards()});
- $('#sb-add-shot').onclick=()=>{if(b.shots.length>=8)return;b.shots.push({id:sbId(),title:'补充镜头',prompt:'描述这一镜头的静态画面、景别、姿态和道具位置。',job_id:null});sbDirty();renderStoryboards()};
+ $('#sb-add-shot').onclick=()=>{if(b.shots.length>=8)return;const id=sbId();v.activeShot=id;b.shots.push({id,title:'补充镜头',prompt:'描述这一镜头的静态画面、景别、姿态和道具位置。',job_id:null});sbDirty();renderStoryboards()};
  $('#sb-save').onclick=()=>sbAction(()=>sbCommit());
  $('#sb-master-generate').onclick=()=>sbGenerate('master');$('#sb-generate-shots').onclick=()=>sbGenerate('shots');
- $('#sb-confirm').onclick=()=>sbAction(async()=>{await sbCommit();sbMerge(await api('/api/storyboards/confirm',{id:v.board.id,version:v.board.version}));toast('定稿图已确认，可以批量生成分镜')});
+ $('#sb-confirm').onclick=()=>sbAction(async()=>{await sbCommit();sbMerge(await api('/api/storyboards/confirm',{id:v.board.id,version:v.board.version}));v.stage='shots';toast('定稿图已确认，可以批量生成分镜')});
  sbUpdateResults();
 }
 function sbDirty(){storyboardView.dirty=true;storyboardView.pending=null;const n=$('#sb-save-note');if(n)n.textContent='有未保存的修改'}
@@ -45,7 +46,7 @@ function sbUpdateResults(){
  const locked=v.busy||b.busy,master=sbJob(b.master_job_id),confirmed=!!b.master_upload_id;
  $('#sb-master-result').innerHTML=sbPreview(master,'先生成一张视觉定稿图');
  $('#sb-capability').textContent=sbCanReference()?'此连接支持参考图，可用于定稿与分镜。':'当前图像连接不支持参考图，生成分镜前需更换；不会降级成无参考图生成。';
- $('#sb-confirm').textContent=confirmed?'已确认 · 全部分镜共用此图':'确认此图，作为共同参考';
+ $('#sb-confirm').textContent=confirmed?'已确认 · 可进入分镜工作台':'确认定稿，进入分镜';
  $('#page').querySelectorAll('input,textarea,select,button').forEach(e=>e.disabled=locked);
  $('#sb-confirm').disabled=locked||confirmed||!sbAsset(master);
  $('#sb-master-generate').disabled=locked||!b.provider_id;
@@ -60,6 +61,11 @@ function sbUpdateResults(){
  document.querySelectorAll('[data-sb-retry]').forEach(e=>e.onclick=()=>sbGenerate('shot',e.dataset.sbRetry));
  document.querySelectorAll('[data-sb-transfer]').forEach(e=>e.onclick=()=>sbTransfer(e.dataset.sbTransfer,e.dataset.slot));
  $('#sb-error').hidden=!v.error;$('#sb-error').textContent=v.error;
+ sbUpdateStage();
+ document.querySelectorAll('[data-sb-move]').forEach(e=>{const i=b.shots.findIndex(s=>s.id===e.dataset.sbMove);e.disabled=locked||i+Number(e.dataset.direction)<0||i+Number(e.dataset.direction)>=b.shots.length});
+ $('#sb-video-target').value=chosen('video')?.id||'';$('#sb-video-target').disabled=v.busy;
+ $('#sb-collect').disabled=v.busy||!capabilities(chosen('video')).reference_images||!b.shots.some(s=>sbAsset(sbJob(s.job_id)));
+ document.querySelectorAll('[data-action]').forEach(e=>{if(['video-workspace','storyboard-open'].includes(e.dataset.action))e.disabled=v.busy});
 }
 async function sbCommit(){
  const v=storyboardView;if(!v.dirty&&v.board.id)return;
@@ -82,7 +88,7 @@ function sbAcceptVideoAsset(asset,slot){
  if(slot==='references'&&d.assets.references.length>=(p?.protocol==='weijin_video'?9:8))throw Error('视频参考图已达到数量上限');
  state.assets[asset.id]=asset;
  if(slot==='references'){d.assets.references.push(asset.id);d.mode='reference'}
- else{d.assets[slot]=asset.id;d.mode=slot==='last_frame'||(d.assets.first_frame&&d.assets.last_frame)?'first_last':'first'}
+ else{d.assets[slot]=asset.id;d.mode=slot==='last_frame'||(c.last_frame&&d.assets.first_frame&&d.assets.last_frame)?'first_last':'first'}
 }
 async function sbTransfer(job_id,slot){await sbAction(async()=>{
  const c=capabilities(chosen('video'));if(!c[slot==='references'?'reference_images':slot])throw Error('请先选择支持此输入模式的视频模型');
@@ -91,6 +97,6 @@ async function sbTransfer(job_id,slot){await sbAction(async()=>{
  const asset=cached||await api('/api/storyboards/transfer',{id:storyboardView.board.id,job_id});storyboardView.transfers[job_id]=asset;sbAcceptVideoAsset(asset,slot);toast('已加入视频草稿；返回视频生成后检查描述与素材，不会自动提交视频');
 })}
 let sbPolling=false;
-async function sbPoll(){const v=storyboardView;if(sbPolling||v.busy||!v.board?.id||!v.board.busy)return;sbPolling=true;const id=v.board.id;try{const b=await api('/api/storyboards?id='+id);if(v.board?.id===id&&!v.busy){if(v.dirty){v.board.jobs=b.jobs;v.board.busy=b.busy}else sbMerge(b);if(v.open&&state.page==='video')sbUpdateResults()}}catch(err){v.error=err.message;if(v.open&&state.page==='video')sbUpdateResults()}finally{sbPolling=false}}
+async function sbPoll(){const v=storyboardView;if(sbPolling||v.busy||!v.board?.id||!v.board.busy)return;sbPolling=true;const id=v.board.id;try{const b=await api('/api/storyboards?id='+id);if(v.board?.id===id&&!v.busy){if(v.dirty){v.board.jobs=b.jobs;v.board.busy=b.busy}else sbMerge(b);if(v.open&&state.page==='video'){if(!b.busy)renderStoryboards();else sbUpdateResults()}}}catch(err){v.error=err.message;if(v.open&&state.page==='video')sbUpdateResults()}finally{sbPolling=false}}
 document.addEventListener('click',e=>{if(e.target.closest('[data-action="storyboard-open"]'))sbOpen()});
 setInterval(sbPoll,2500);

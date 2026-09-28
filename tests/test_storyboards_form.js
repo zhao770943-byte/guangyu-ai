@@ -13,16 +13,30 @@ class Element{
  querySelectorAll(s){return queryAll(s)}
  querySelector(s){return document.querySelector(s)}
 }
-function parse(html){for(const m of html.matchAll(/<(button|input|textarea|select|p|div|span)\b([^>]*)>/g)){const e=new Element(m[1],m[2]);all.push(e);if(e.id)ids[e.id]=e}}
+function parse(html){for(const m of html.matchAll(/<(button|input|textarea|select|p|div|span|section|article|aside|nav)\b([^>]*)>/g)){const e=new Element(m[1],m[2]);all.push(e);if(e.id)ids[e.id]=e}}
 function queryAll(selectors){return all.filter(e=>selectors.split(',').some(s=>s.startsWith('[')?Object.hasOwn(e,s.slice(1,-1)):e.tag===s))}
 const page=new Element('div','id="page"');ids.page=page;
 const document={querySelector:s=>ids[s.slice(1)]||null,querySelectorAll:queryAll};
 const ctx=vm.createContext({document,console,crypto,setTimeout,clearTimeout});
 vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],ctx);
+vm.runInContext(fs.readFileSync(path.join(root,'public/storyboard-layout.js'),'utf8'),ctx);
+vm.runInContext(fs.readFileSync(path.join(root,'public/library-picker.js'),'utf8').split("document.addEventListener('click'")[0],ctx);
 vm.runInContext(fs.readFileSync(path.join(root,'public/storyboards.js'),'utf8').split("document.addEventListener('click'")[0],ctx);
 async function run(){
  vm.runInContext(`state.page='video';state.providers=[{id:'image',name:'Fixture image',kind:'image',capabilities:{reference_images:true},model:'gpt-image-1'}];storyboardView.open=true;storyboardView.board=sbFresh();storyboardView.board.story='A shopping street';storyboardView.dirty=true;renderStoryboards();`,ctx);
  assert.ok(ids['sb-confirm'].disabled);assert.ok(ids['sb-generate-shots'].disabled);
+ assert.equal(ids['sb-stage-master'].hidden,false);assert.equal(ids['sb-stage-shots'].hidden,true);
+ const firstShot=vm.runInContext('storyboardView.board.shots[0].id',ctx);
+ const secondShot=vm.runInContext('storyboardView.board.shots[1].id',ctx);
+ all.find(e=>e.dataset.sbStage==='shots').onclick();
+ assert.equal(ids['sb-stage-master'].hidden,true);assert.equal(ids['sb-stage-shots'].hidden,false);
+ ids['sb-prompt-'+firstShot].value='Keep this shot description';ids['sb-prompt-'+firstShot].oninput();
+ all.find(e=>e.dataset.sbSelect===secondShot).onclick();
+ assert.equal(ids['sb-shot-'+firstShot].hidden,true);assert.equal(ids['sb-shot-'+secondShot].hidden,false);
+ assert.equal(vm.runInContext('storyboardView.board.shots[0].prompt',ctx),'Keep this shot description');
+ all.find(e=>e.dataset.sbMove===secondShot&&e.dataset.direction==='-1').onclick();
+ assert.equal(vm.runInContext('storyboardView.board.shots[0].id',ctx),secondShot);
+ assert.equal(vm.runInContext('storyboardView.activeShot',ctx),secondShot);
  ids['sb-title'].oninput({target:{value:'London fashion'}});
  assert.equal(vm.runInContext('storyboardView.board.title',ctx),'London fashion');
  ctx.requests=[];

@@ -29,7 +29,7 @@ function bindVideoCanvas(p){
   $('#size-input').onchange=e=>{d.size=e.target.value.trim().toLowerCase()||'auto';refreshVideoCanvas()};
   $('#seconds-input').setCustomValidity(o.sora&&!o.durations.includes(d.seconds)?'请选择此模型支持的时长。':'');
 }
-function videoAssets(p,d){
+function videoUploadAssets(p,d){
   const c=capabilities(p);
   if(!p)return '<div class="video-input-empty">接入视频模型后，可使用其支持的首帧、尾帧或参考图片。</div>';
   if(d.mode==='text')return '<div class="video-input-empty">当前为文生视频。需要控制起始画面时，切换上方「首帧引导」；接口支持时还可选择首尾帧或参考图模式。</div>';
@@ -49,3 +49,11 @@ function videoAdvancedFields(p){
 }
 function bindVideoDirections(){document.querySelectorAll('[data-video-direction]').forEach(el=>el.onchange=()=>{const d=state.drafts.video;d.videoDirection={...d.videoDirection,[el.dataset.videoDirection]:el.value}})}
 function applyVideoDirections(){const d=state.drafts.video,lines=Object.values(d.videoDirection||{}).filter(Boolean);if(!lines.length)return toast('先选择镜头运动、景别或节奏');const text='镜头要求：'+lines.join('；')+'。';if(d.prompt.includes(text))return toast('相同镜头要求已在描述中');const next=[d.prompt.trim(),text].filter(Boolean).join('\n\n');if(next.length>32000)return toast('描述过长，请先精简后添加');d.prompt=next;$('#prompt').value=next;$('#prompt-count').textContent=`${next.length} / 32000`;toast('镜头要求已写入描述，可继续编辑')}
+
+function videoAssets(p,d){
+ const base=videoUploadAssets(p,d),c=capabilities(p);
+ if(!p||typeof libraryButton!=='function')return base;
+ const slots=d.mode==='reference'?['references']:d.mode==='first'?['first_frame']:d.mode==='first_last'?['first_frame','last_frame']:['references','first_frame','last_frame'];
+ const available=slots.filter(slot=>c[slot==='references'?'reference_images':slot]);
+ return base+(available.length?`<div class="video-library-picks"><div><b>从作品库选图</b><small>复用生成图片，无需下载再上传</small></div><div>${available.map(slot=>libraryButton(slot,({references:'选参考图',first_frame:'选首帧',last_frame:'选尾帧'})[slot])).join('')}</div></div>`:'');
+}

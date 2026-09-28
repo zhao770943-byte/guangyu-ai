@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
             static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/video-controls.js':'video-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
-            static.update({'/storyboards.js':'storyboards.js','/storyboards.css':'storyboards.css'})
+            static.update({'/library-picker.js':'library-picker.js','/storyboard-layout.js':'storyboard-layout.js','/storyboards.js':'storyboards.js','/storyboards.css':'storyboards.css'})
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return
@@ -243,6 +243,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/storyboards/generate':return self.json_response(storyboards.generate(body,create_job,dispatch,ACTIVE,ACTIVE_LOCK),202)
             if self.path=='/api/storyboards/confirm':return self.json_response(storyboards.confirm(body,ACTIVE_LOCK))
             if self.path=='/api/storyboards/transfer':return self.json_response(storyboards.transfer(body))
+            if self.path=='/api/library/image':return self.json_response(storyboards.library_image(body))
             if self.path=='/api/providers/save':return self.json_response(save_provider(body))
             if self.path=='/api/models/discover':return self.json_response(model_catalog.discover(body))
             if self.path=='/api/providers/delete':storage.delete_provider(body.get('id',''));return self.json_response({'ok':True})
