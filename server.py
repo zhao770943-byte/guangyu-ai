@@ -4,7 +4,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
-import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library
+import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library, storyboards
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 VERSION = '2.3.1'
@@ -112,7 +112,7 @@ def save_provider(body):
     storage.put('providers',p)
     return storage.public_provider(p)
 
-def create_job(body):
+def create_job(body, *, prepare_only=False):
     p=storage.get('providers',body.get('provider_id',''))
     if not p:raise ValueError('请先选择有效的模型连接。')
     prompt=body.get('prompt','')
@@ -143,6 +143,7 @@ def create_job(body):
             messages.append({'role':'user','content':prompt});job.update(conversation_id=conv['id'],messages=messages)
             conv['messages'].append({'role':'user','content':prompt,'job_id':job['id']});conv['updated_at']=storage.now()
         providers.build(p,job)
+        if prepare_only:return job
         if conv:storage.put('conversations',conv)
         storage.put('jobs',job);dispatch(job)
     return storage.public_job(job)
@@ -183,6 +184,9 @@ class Handler(BaseHTTPRequestHandler):
                 if csv_requested:
                     raw=usage.csv_export(report).encode('utf-8');self.send_headers(200,'text/csv; charset=utf-8',len(raw),{'Content-Disposition':'attachment; filename="guangyu-usage.csv"'});self.wfile.write(raw);return
                 return self.json_response(report)
+            if path=='/api/storyboards':
+                identity=parse_qs(urlsplit(self.path).query).get('id',[''])[0]
+                return self.json_response(storyboards.public(storyboards.require(identity)) if identity else {'boards':storyboards.list_projects()})
             if path=='/api/jobs':return self.json_response({'jobs':[storage.public_job(j) for j in storage.items('jobs',-1)]})
             if path.startswith('/api/jobs/'):
                 job=storage.get('jobs',path.rsplit('/',1)[-1]);return self.json_response(storage.public_job(job) if job else {'error':'任务不存在。'},200 if job else 404)
@@ -199,6 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
             static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/video-controls.js':'video-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
+            static.update({'/storyboards.js':'storyboards.js','/storyboards.css':'storyboards.css'})
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return
@@ -234,6 +239,10 @@ class Handler(BaseHTTPRequestHandler):
             body=json.loads(self.rfile.read(length),parse_constant=lambda x:(_ for _ in ()).throw(ValueError('JSON 不允许非有限数值。')))
             if not isinstance(body,dict):raise ValueError('请求必须为 JSON 对象。')
             if self.path=='/api/uploads':return self.json_response(uploads.save(body),201)
+            if self.path=='/api/storyboards/save':return self.json_response(storyboards.save(body))
+            if self.path=='/api/storyboards/generate':return self.json_response(storyboards.generate(body,create_job,dispatch,ACTIVE,ACTIVE_LOCK),202)
+            if self.path=='/api/storyboards/confirm':return self.json_response(storyboards.confirm(body,ACTIVE_LOCK))
+            if self.path=='/api/storyboards/transfer':return self.json_response(storyboards.transfer(body))
             if self.path=='/api/providers/save':return self.json_response(save_provider(body))
             if self.path=='/api/models/discover':return self.json_response(model_catalog.discover(body))
             if self.path=='/api/providers/delete':storage.delete_provider(body.get('id',''));return self.json_response({'ok':True})
