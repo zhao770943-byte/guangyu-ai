@@ -85,6 +85,14 @@ class Fixture(BaseHTTPRequestHandler):
             return self.send({}, 302, {'Location': f'http://127.0.0.1:{self.server.server_port}/redirect-target'})
         if parsed.path == '/custom/catalog':
             return self.send({'items': [{'id': 'gpt-custom-chat', 'name': 'Custom model'}]})
+        if parsed.path == '/dual/custom-catalog':
+            if self.headers.get('X-Catalog-Key') != 'Catalog ' + KEY or self.headers.get('Authorization'):
+                return self.send({'error': {'message': 'wrong custom directory authentication'}}, 401)
+            return self.send({'items': [{'id': 'gpt-dual-fixture'}]})
+        if parsed.path == '/dual/models':
+            if self.headers.get('Authorization') != 'Bearer ' + KEY or self.headers.get('X-Catalog-Key') or self.headers.get('X-Generation-Key'):
+                return self.send({'error': {'message': 'wrong native directory authentication'}}, 401)
+            return self.send({'data': [{'id': 'gpt-dual-fixture'}]})
         if parsed.path == '/single/models':
             return self.send({'data': [{'id': 'gpt-single'}]})
         return self.send({'error': {'message': 'not found'}}, 404)
@@ -256,6 +264,53 @@ class DiscoveryTests(unittest.TestCase):
         headers = {key.lower(): val for key, val in CALLS[0]['headers'].items()}
         self.assertEqual(headers['x-custom-key'], KEY)
         self.assertEqual(CALLS[0]['path'], '/custom/catalog')
+
+    def test_saved_native_generation_uses_custom_directory_without_changing_generation(self):
+        custom = {'discovery_protocol': 'custom', 'discovery_path': '/custom-catalog',
+                  'auth_header': 'X-Catalog-Key', 'auth_prefix': 'Catalog '}
+        saved = self.save('/dual', custom=custom)
+        self.assertEqual(saved['custom']['discovery_protocol'], 'custom')
+        self.assertEqual(saved['protocol'], 'openai_chat')
+        self.assertEqual(self.api('/api/providers/check', {'id': saved['id']}), {'models': ['gpt-dual-fixture']})
+        discovered = self.api('/api/models/discover', {'id': saved['id']})
+        self.assertEqual(discovered['models'][0]['protocol'], 'openai_chat')
+        self.assertTrue(all(call['path'] == '/dual/custom-catalog' for call in CALLS))
+        self.assertEqual(storage.get('providers', saved['id'])['protocol'], 'openai_chat')
+        generation_headers = providers.headers(storage.get('providers', saved['id']))
+        self.assertEqual(generation_headers['Authorization'], 'Bearer ' + KEY)
+        self.assertNotIn('X-Catalog-Key', generation_headers)
+
+    def test_saved_custom_generation_uses_native_directory_authentication(self):
+        custom = {'discovery_protocol': 'openai_chat', 'submit_path': '/generate',
+                  'body': {'model': '{{model}}', 'prompt': '{{prompt}}'}, 'text_path': 'reply',
+                  'auth_header': 'X-Generation-Key', 'auth_prefix': 'Generate '}
+        saved = self.save('/dual', protocol='custom', custom=custom)
+        self.assertEqual(self.api('/api/providers/check', {'id': saved['id']}), {'models': ['gpt-dual-fixture']})
+        discovered = self.api('/api/models/discover', {'id': saved['id']})
+        self.assertEqual(discovered['models'][0]['protocol'], 'custom')
+        self.assertTrue(all(call['path'] == '/dual/models' for call in CALLS))
+        generation_headers = providers.headers(storage.get('providers', saved['id']))
+        self.assertEqual(generation_headers['X-Generation-Key'], 'Generate ' + KEY)
+        self.assertNotIn('Authorization', generation_headers)
+
+    def test_explicit_discovery_protocol_overrides_saved_directory_protocol(self):
+        saved = self.save('/dual', custom={'discovery_protocol': 'custom', 'discovery_path': '/custom-catalog',
+                          'auth_header': 'X-Catalog-Key', 'auth_prefix': 'Catalog '})
+        result = self.api('/api/models/discover', {'id': saved['id'], 'protocol': 'openai_chat',
+                                                 'discovery_path': '/models'})
+        self.assertEqual(result['models'][0]['id'], 'gpt-dual-fixture')
+        self.assertEqual(CALLS[-1]['path'], '/dual/models')
+        self.assertEqual(storage.get('providers', saved['id'])['custom']['discovery_protocol'], 'custom')
+
+    def test_directory_protocol_and_custom_auth_validated_before_save_or_http(self):
+        for custom in ({'discovery_protocol': 'openai_image'}, {'discovery_protocol': ['custom']},
+                       {'discovery_protocol': 'custom', 'auth_header': 'Host'},
+                       {'discovery_protocol': 'custom', 'auth_prefix': 'bad\nvalue'}):
+            self.api('/api/providers/save', {**self.config(), 'name': 'Invalid directory',
+                                            'model': 'gpt-fixture', 'custom': custom}, 400)
+            self.discover(custom=custom, status=400)
+        self.assertFalse(storage.items('providers'))
+        self.assertFalse(CALLS)
 
     def test_invalid_path_header_and_local_optin_reject_before_http(self):
         for path in ('https://evil.invalid', '//evil.invalid', '/../models', '/models?key=secret'):

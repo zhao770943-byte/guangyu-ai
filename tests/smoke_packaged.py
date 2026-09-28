@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 
 KEY = 'fixture-only-packaged-test-key'
+EXPECTED_VERSION = (Path(__file__).resolve().parents[1] / 'VERSION').read_text(encoding='utf-8').strip()
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMwCqgAAAGyAPsem+p5AAAAAElFTkSuQmCC')
 ENTERED, RELEASE = threading.Event(), threading.Event()
 AUTHENTICATED = []
@@ -131,10 +132,12 @@ def main():
         try:
             run()
             health = request('/api/health')
-            check(health['app'] == 'GuangyuAI' and health['version'] == '2.1.0', 'Frozen executable starts without Python on PATH, from Chinese path and unrelated CWD')
+            check(health['app'] == 'GuangyuAI' and health['version'] == EXPECTED_VERSION, 'Frozen executable starts without Python on PATH, from Chinese path and unrelated CWD')
             data = installation / 'data'
             check((data / 'workspace.sqlite3').is_file() and not (cwd / 'data').exists(), 'Default data directory stays beside executable')
             check(b'<html' in request('/') and len(request('/app.js')) > 1000 and len(request('/style.css')) > 1000, 'Bundled HTML, JS and CSS resources served')
+            check(len(request('/connections.js')) > 1000 and len(request('/connections.css')) > 1000,
+                  'Bundled connection management JavaScript and styles served')
             bootstrap = request('/api/bootstrap')
             csrf = bootstrap['csrf']
             check(bootstrap['providers'] == [] and bootstrap['jobs'] == [], 'Distribution starts with no providers, keys or history')

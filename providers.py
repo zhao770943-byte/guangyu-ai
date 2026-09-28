@@ -60,6 +60,21 @@ def validate_discovery_path(value):
     if parsed.query or parsed.fragment:raise ValueError('模型列表路径只填写相对路径，不包含查询参数或片段。')
     return value
 
+def validate_discovery_protocol(value):
+    if value in ('',None):return ''
+    if not isinstance(value,str) or value not in ('openai_chat','anthropic','gemini','custom'):
+        raise ValueError('模型目录协议无效。')
+    return value
+
+def validate_custom_auth(custom):
+    header=custom.get('auth_header','Authorization')
+    prefix=custom.get('auth_prefix','Bearer ')
+    if not isinstance(header,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]{0,79}',header) or header.lower() in {'host','content-length','content-type','connection','cookie','origin','referer','proxy-authorization','transfer-encoding'}:
+        raise ValueError('认证请求头无效或保留。')
+    if not isinstance(prefix,str) or len(prefix)>100 or any(ord(ch)<32 for ch in prefix):
+        raise ValueError('认证前缀无效或包含控制字符。')
+    return header,prefix
+
 def validate(p):
     if p.get('kind') not in PROTOCOLS or p.get('protocol') not in PROTOCOLS[p['kind']]: raise ValueError('用途与协议不匹配。')
     for field,maximum in [('name',60),('model',200),('base_url',2000)]:
@@ -77,6 +92,8 @@ def validate(p):
     custom=p.get('custom') or {}
     if not isinstance(custom,dict):raise ValueError('自定义接口配置应为 JSON 对象。')
     validate_discovery_path(custom.get('discovery_path'))
+    discovery_protocol=validate_discovery_protocol(custom.get('discovery_protocol'))
+    if discovery_protocol=='custom':validate_custom_auth(custom)
     if p['protocol']=='custom':
         c=custom
         validate_path(c.get('submit_path',''))
@@ -87,9 +104,7 @@ def validate(p):
         if not isinstance(c.get('body'),dict): raise ValueError('请求模板必须是 JSON 对象。')
         capabilities.validate_custom(c)
         substitute(c['body'],template_context(p,{'prompt':'prompt','messages':[],'size':'auto','seconds':4}))
-        header=c.get('auth_header','Authorization')
-        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]{0,79}',header) or header.lower() in {'host','content-length','content-type','connection','cookie','origin','referer','proxy-authorization','transfer-encoding'}: raise ValueError('认证请求头无效或保留。')
-        if any(ord(ch)<32 for ch in c.get('auth_prefix','Bearer ')): raise ValueError('认证前缀不能含换行。')
+        validate_custom_auth(c)
         if p['kind']=='chat' and not c.get('text_path'): raise ValueError('答疑接口需填写文本响应路径。')
         if p['kind']!='chat' and not(c.get('media_path') or (p['kind']=='image' and c.get('base64_path'))): raise ValueError('媒体接口需填写媒体 URL 或图片 Base64 响应路径。')
         for field in ('text_path','media_path','base64_path','id_path','status_path','response_model_path','response_id_path'):

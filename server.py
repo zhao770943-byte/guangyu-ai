@@ -7,7 +7,7 @@ import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
 import providers, storage, capabilities, uploads, usage, model_catalog
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '2.1.0'
+VERSION = '2.2.0'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)
@@ -110,7 +110,7 @@ def create_job(body):
     return storage.public_job(job)
 
 class Handler(BaseHTTPRequestHandler):
-    server_version='GuangyuAI/2.1'
+    server_version='GuangyuAI/2.2'
     def log_message(self,fmt,*args):pass
     def send_headers(self,status,kind,length=None,extra=None):
         self.send_response(status);self.send_header('Content-Type',kind)
@@ -160,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
                 filename=path[7:]
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
-            static={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg'}
+            static={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return

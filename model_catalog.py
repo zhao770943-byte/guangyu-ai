@@ -88,16 +88,16 @@ def prepare(body):
     if not isinstance(custom, dict):
         raise ValueError('自定义模型列表配置应为 JSON 对象。')
     path = providers.validate_discovery_path(body.get('discovery_path', custom.get('discovery_path')))
-    header, prefix = custom.get('auth_header', 'Authorization'), custom.get('auth_prefix', 'Bearer ')
-    if not isinstance(header, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]{0,79}', header) or header.lower() in {
-        'host', 'content-length', 'content-type', 'connection', 'cookie', 'origin', 'referer',
-        'proxy-authorization', 'transfer-encoding'}:
-        raise ValueError('模型列表认证请求头无效或保留。')
-    if not isinstance(prefix, str) or len(prefix) > 100 or any(ord(ch) < 32 for ch in prefix):
-        raise ValueError('模型列表认证前缀无效。')
+    header, prefix = providers.validate_custom_auth(custom)
+    discovery_protocol = providers.validate_discovery_protocol(custom.get('discovery_protocol'))
+    # The unsaved form's explicit protocol is this request's selection. An old
+    # persisted directory protocol must not silently override it.
+    if body.get('protocol'):
+        discovery_protocol = ''
     return {'id': identity, 'platform': platform, 'kind': kind, 'protocol': protocol,
             'base_url': base_url, 'allow_local': allow_local, 'secret': secret,
-            'custom': {'discovery_path': path, 'auth_header': header, 'auth_prefix': prefix}}
+            'custom': {'discovery_path': path, 'discovery_protocol': discovery_protocol,
+                       'auth_header': header, 'auth_prefix': prefix}}
 
 
 def _family(provider):
@@ -238,7 +238,11 @@ def discover_saved(provider):
     """Discover from saved config, preserving providers/check's list-of-IDs API."""
     provider = dict(provider)
     provider['base_url'] = providers.validate_base_url(provider.get('base_url'), provider.get('allow_local'))
-    family = _family(provider)
+    custom = provider.get('custom') or {}
+    discovery_protocol = providers.validate_discovery_protocol(custom.get('discovery_protocol'))
+    catalog_provider = {**provider, 'protocol': discovery_protocol or provider['protocol']}
+    providers.validate_custom_auth(custom)
+    family = _family(catalog_provider)
     report = {'models': [], 'source': 'api', 'base_url': provider['base_url'],
               'protocol': provider['protocol'], 'pages': 0, 'truncated': False,
               'supported': family != 'unsupported', 'caveat': CAVEAT}
@@ -259,7 +263,7 @@ def discover_saved(provider):
             report['truncated'] = True
             break
         path = base_path + ('?' + urllib.parse.urlencode(query) if query else '')
-        payload, count = _request(provider, path, key, min(TIMEOUT, remaining))
+        payload, count = _request(catalog_provider, path, key, min(TIMEOUT, remaining))
         size += count
         if size > MAX_TOTAL_BYTES:
             report['truncated'] = True
