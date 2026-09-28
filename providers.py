@@ -7,11 +7,12 @@ MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
 class ProviderError(Exception):
-    def __init__(self, message, uncertain=False, retryable=False, response=None):
+    def __init__(self, message, uncertain=False, retryable=False, response=None, code=None):
         super().__init__(message)
         self.uncertain = uncertain
         self.retryable = retryable
         self.response = response
+        self.code = code
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl): return None
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
@@ -141,6 +142,9 @@ def validate(p):
     if url.scheme!='https' and not(url.scheme=='http' and local and p.get('allow_local') is True): raise ValueError('接口需使用 HTTPS；本机 HTTP 需勾选“允许本机 HTTP 服务”。')
     p['base_url']=p['base_url'].rstrip('/')
     if not isinstance(p.get('extra',{}),dict) or len(json.dumps(p.get('extra',{})))>24000: raise ValueError('附加参数必须是大小合理的 JSON 对象。')
+    timeout = p.get('request_timeout_seconds')
+    if timeout is not None and (type(timeout) is not int or not 60 <= timeout <= 1800):
+        raise ValueError('响应等待上限应为 60–1800 秒的整数，留空使用按用途配置的默认值。')
     custom=p.get('custom') or {}
     if not isinstance(custom,dict):raise ValueError('自定义接口配置应为 JSON 对象。')
     validate_discovery_path(custom.get('discovery_path'))
@@ -180,6 +184,13 @@ def headers(p):
             c=p['custom'];h[c.get('auth_header','Authorization')]=c.get('auth_prefix','Bearer ')+key
     elif key: h['Authorization']='Bearer '+key
     return h
+def request_timeout(p, submitting=True):
+    # Submission may synchronously render a large image. Poll GETs stay bounded
+    # independently; a lost POST response is never permission to submit again.
+    if not submitting:return 150
+    return p.get('request_timeout_seconds') or {'image':600,'video':300}.get(p.get('kind'),150)
+
+
 def request(p,path,payload=None,multipart=False,binary=False):
     h=headers(p);data=None
     if payload is not None:
@@ -198,8 +209,9 @@ def request(p,path,payload=None,multipart=False,binary=False):
         else:
             data=json.dumps(payload,ensure_ascii=False,allow_nan=False).encode();h['Content-Type']='application/json'
     req=urllib.request.Request(endpoint(p,path),data=data,headers=h,method='POST' if data is not None else 'GET')
+    timeout=request_timeout(p, submitting=payload is not None)
     try:
-        with OPENER.open(req,timeout=150) as response: raw=response.read(MAX_JSON+1)
+        with OPENER.open(req,timeout=timeout) as response: raw=response.read(MAX_JSON+1)
         if len(raw)>MAX_JSON: raise ProviderError('模型响应超过 96 MiB，已停止读取。')
         if binary:return raw
         try: result=json.loads(raw)
@@ -217,8 +229,13 @@ def request(p,path,payload=None,multipart=False,binary=False):
         safe_path=clean_error(urllib.parse.unquote(urllib.parse.urlsplit(path).path),p)
         guidance=' 请核对模型用途、接口协议和请求路径。' if ex.code in (404,405) else ''
         raise ProviderError(f'平台返回 HTTP {ex.code}（{req.get_method()} {safe_path}）：{clean_error(detail,p)}{guidance}',retryable=payload is None and ex.code in (408,429,500,502,503,504),response=obj if isinstance(obj,dict) else None) from None
-    except (urllib.error.URLError,TimeoutError,socket.timeout,ConnectionError,OSError):
-        raise ProviderError('网络连接失败或超时。平台可能已接受请求，请先在平台核对任务和用量，再决定是否重新提交。',uncertain=payload is not None,retryable=payload is None) from None
+    except (urllib.error.URLError,TimeoutError,socket.timeout,ConnectionError,OSError) as ex:
+        timed_out=isinstance(ex,TimeoutError) or isinstance(getattr(ex,'reason',None),TimeoutError)
+        message=f'等待平台响应超时（网络等待上限 {timeout} 秒）。' if timed_out else '与平台的网络连接中断，未收到完整响应。'
+        message+=('平台可能仍在处理，是否完成或扣费尚未确认。请先核对平台任务与用量；本机不会自动重复提交。' if payload is not None
+                  else '本次仅查询原任务，未重新生成；可稍后继续查询。')
+        raise ProviderError(message,uncertain=payload is not None,retryable=payload is None,
+                            code='response_timeout' if timed_out else 'connection_interrupted') from None
 def dig(obj,path):
     if not path:return None
     for key in path.split('.'):
@@ -259,6 +276,8 @@ def template_context(p,job):
 
 def build(p,job):
     validate_model_kind(p)
+    import video_controls
+    video_controls.validate(p,job.get('size','auto'),job.get('seconds',4))
     protocol,kind=p['protocol'],p['kind'];prompt,model=job['prompt'],p['model']
     messages=job.get('messages',[{'role':'user','content':prompt}]);multipart=False
     inputs,params,_=capabilities.validate_job(p,job.get('input_assets'),job.get('parameters'),job.get('size','auto'))

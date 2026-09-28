@@ -31,7 +31,7 @@ def run_job(identity,resume=False):
         archive_status=('pending' if any(not a.get('local') for a in assets) else 'saved') if assets else None
         storage.update_job(identity,status='succeeded',result=result,error='',archive_status=archive_status,usage=result.get('usage',job.get('usage')),response_model=result.get('response_model'),response_id=result.get('response_id'),**timing())
         if archive_status=='pending':run_archive(identity,release=False)
-    except providers.ProviderError as ex:storage.update_job(identity,status='interrupted' if ex.uncertain else 'failed',error=providers.clean_error(str(ex),p),**timing())
+    except providers.ProviderError as ex:storage.update_job(identity,status='interrupted' if ex.uncertain else 'failed',error=providers.clean_error(str(ex),p),error_code=ex.code,**timing())
     except Exception:storage.update_job(identity,status='failed',error='处理响应时发生错误。请核对协议、模型及字段映射；如平台已接受请求，请先核对用量。',**timing())
     finally:
         with ACTIVE_LOCK:ACTIVE.discard(identity)
@@ -94,6 +94,7 @@ def save_provider(body):
     if body.get('id') and not existing:raise ValueError('连接已不存在，请刷新后重试。')
     p={k:body.get(k) for k in ['name','kind','protocol','base_url','model']}
     p.update(id=identity,allow_local=body.get('allow_local') is True,extra=body.get('extra',{}),custom=body.get('custom',{}))
+    p['request_timeout_seconds']=body.get('request_timeout_seconds',(existing or {}).get('request_timeout_seconds'))
     p['platform']=model_catalog.validate_platform(body.get('platform',(existing or {}).get('platform','custom')))
     providers.validate(p)
     key=body.get('api_key','')
@@ -111,12 +112,14 @@ def create_job(body):
     prompt=prompt.strip();size=body.get('size','auto');seconds=body.get('seconds',4)
     if not isinstance(size,str) or (size!='auto' and not re.fullmatch(r'\d{2,5}x\d{2,5}',size)):raise ValueError('尺寸请使用 宽x高，例如 1024x1024。')
     if type(seconds)!=int or not 1<=seconds<=120:raise ValueError('时长应为 1–120 秒。')
+    import video_controls
+    video_controls.validate(p,size,seconds)
     input_assets,parameters,caps=capabilities.validate_job(p,body.get('input_assets'),body.get('parameters'),size)
     context=assistant_context(body.get('assistant_context')) if p['kind']=='chat' else None
     with ACTIVE_LOCK,storage.LOCK:
         if len(ACTIVE)>=12:raise ValueError('当前任务较多，请等待已有任务结束。')
         job={'id':storage.uid(),'kind':p['kind'],'provider_id':p['id'],'provider_name':p['name'],'model':p['model'],'provider_snapshot':p,'prompt':prompt,'size':size,'seconds':seconds,'created_at':storage.now(),'updated_at':storage.now(),'status':'queued','result':{'text':'','assets':[]},'error':'','upstream_id':''}
-        job.update(input_assets=input_assets,parameters=parameters,capabilities_snapshot=caps,mapped_controls_snapshot=capabilities.mapped_controls(p),usage=providers.normalize_usage(p,{}),started_at=None,finished_at=None,elapsed_ms=None,response_model=None,response_id=None)
+        job.update(input_assets=input_assets,parameters=parameters,capabilities_snapshot=caps,mapped_controls_snapshot=capabilities.mapped_controls(p),request_timeout_seconds=providers.request_timeout(p),usage=providers.normalize_usage(p,{}),started_at=None,finished_at=None,elapsed_ms=None,response_model=None,response_id=None)
         conv=None
         if p['kind']=='chat':
             conv_id=body.get('conversation_id');conv=storage.get('conversations',conv_id) if conv_id else None
@@ -187,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                 filename=path[7:]
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
-            static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
+            static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/video-controls.js':'video-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return

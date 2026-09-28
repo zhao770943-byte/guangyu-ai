@@ -61,7 +61,7 @@ function imageAdvancedFields(p){
   return `<details class="advanced image-advanced" open><summary><span>${icon('sliders')} 高级参数</span>${icon('down')}</summary><div class="advanced-body"><div class="field-grid">${available}</div>${control('负面提示词','negative_prompt',{type:'textarea',placeholder:'不希望出现的元素'})}
     <p class="field-hint" id="image-format-hint">仅 JPEG / WebP 可设置压缩；透明背景需用 PNG / WebP。留空沿用连接或模型默认值。</p>
     ${unsupported.length?`<details class="unsupported-controls"><summary>当前接口未提供的参数 · ${unsupported.length} 项</summary><p>${unsupported.join('、')}：${p?.protocol==='custom'?'尚未在自定义请求模板中映射。可前往模型接入配置。':'当前协议没有这些独立请求参数。可在画面描述中写清排除元素与参考要求；需要精确控制时请选择支持这些参数的模型。'}</p></details>`:''}
-    <p class="field-hint">显示已适配的接口参数；第三方中转平台可能有额外限制。更多张数和更高画质可能增加用量。</p></div></details>`;
+    <p class="field-hint">${p?`生成响应等待上限 ${p.effective_request_timeout||600} 秒，可在模型接入的高级配置中调整。大图、最高质量与透明背景可能需要更久。`:""}</p><p class="field-hint">显示已适配的接口参数；第三方中转平台可能有额外限制。更多张数和更高画质可能增加用量。</p></div></details>`;
 }
 function updateImageFormatControls(){
   const p=chosen('image'),d=state.drafts.image,format=d.parameters.output_format||p?.extra?.output_format||'png';

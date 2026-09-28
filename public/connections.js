@@ -18,6 +18,7 @@ function renderSettings(){
 function connectionAdvancedHTML(p){
   const c=p?.custom||{};
   return `<div class="connection-advanced-intro"><h3>高级参数与协议映射</h3><p>标准接口通常无需调整。自定义接口请按平台文档填写。</p></div>
+    <label>生成请求响应等待上限（秒）<input name="request_timeout_seconds" type="number" min="60" max="1800" step="1" value="${esc(p?.request_timeout_seconds??'')}" placeholder="留空：图像 600、视频 300、其他 150"></label><p class="field-hint">控制提交后的网络等待，可设 60–1800 秒。视频收到任务 ID 后继续后台查询；超时不会自动重复提交。</p>
     <label>附加请求参数（JSON）<textarea name="extra_json" rows="3" spellcheck="false">${esc(JSON.stringify(p?.extra||{},null,2))}</textarea></label>
     <div class="field-grid">${fieldHTML('discovery_path','模型列表路径',c.discovery_path||'',{placeholder:'/models'})}${fieldHTML('auth_header','自定义认证请求头',c.auth_header||'Authorization')}</div>
     ${fieldHTML('auth_prefix','自定义认证前缀',c.auth_prefix??'Bearer ')}<p class="field-hint">认证头与前缀用于自定义 JSON 协议。标准协议使用平台原生鉴权。</p>
@@ -115,7 +116,7 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   async function save(){
     if(saving||busy||!model?.id||!purposeConfirmed||!allowed(model)||unavailable(model)||!validConnection())return;
     const name=f('name').value.trim();if(!name||name.length>60){error('请填写 1–60 字的连接名称。');return}
-    const payload={};['id','platform','kind','protocol','base_url','api_key'].forEach(k=>payload[k]=f(k).value);payload.name=name;payload.model=model.id;payload.allow_local=f('allow_local').checked;
+    const payload={};['id','platform','kind','protocol','base_url','api_key'].forEach(k=>payload[k]=f(k).value);payload.name=name;payload.model=model.id;payload.allow_local=f('allow_local').checked;payload.request_timeout_seconds=f('request_timeout_seconds').value===''?null:Number(f('request_timeout_seconds').value);
     try{payload.extra=JSON.parse(f('extra_json').value||'{}');payload.custom={body:JSON.parse(f('body_template').value||'{}'),usage_paths:JSON.parse(f('usage_paths').value||'{}')}}catch{advanced=true;advancedFrom=2;update();error('高级参数的 JSON 格式不正确。');return}
     ['submit_path','discovery_path','auth_header','auth_prefix','text_path','media_path','base64_path','id_path','status_path','poll_path','response_model_path','response_id_path'].forEach(k=>payload.custom[k]=f(k).value);['success_values','failure_values'].forEach(k=>payload.custom[k]=f(k).value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean));payload.custom.discovery_protocol=f('discovery_protocol').value;payload.custom.capabilities=Object.fromEntries(Object.keys(capabilityNames).map(k=>[k,f('cap_'+k).checked]));
     saving=true;error();update();try{const saved=await api('/api/providers/save',payload);state.providers=state.providers.filter(p=>p.id!==saved.id);state.providers.unshift(saved);state.selected[saved.kind]=saved.id;state.usage=null;if(current()){dialog.close();render();toast(modelTypeLabels[saved.kind]+'模型已接入')}else renderNavigation()}catch(err){if(current())error(err.message)}finally{saving=false;if(current())update()}

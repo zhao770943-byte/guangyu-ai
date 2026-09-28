@@ -5,9 +5,9 @@ import copy
 
 FLAGS = ('reference_images', 'first_frame', 'last_frame', 'negative_prompt', 'seed',
          'aspect_ratio', 'quality', 'batch', 'background', 'resolution', 'camera',
-         'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style')
+         'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale')
 PARAMETERS = ('negative_prompt', 'seed', 'aspect_ratio', 'quality', 'n', 'background',
-              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style')
+              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale')
 VARIABLES = {flag: ('n' if flag == 'batch' else flag) for flag in FLAGS}
 
 
@@ -118,10 +118,13 @@ def validate_job(provider, input_assets, parameters, size='auto'):
         flag = 'batch' if key == 'n' else key
         if not caps[flag]:
             raise ValueError('当前连接不支持高级参数：' + key + '。请求尚未发送。')
-        if key in ('seed', 'n', 'output_compression'):
-            maximum = 2147483647 if key == 'seed' else 100 if key == 'output_compression' else 10
-            if type(value) is not int or not (1 if key == 'n' else 0) <= value <= maximum:
+        if key in ('seed', 'n', 'output_compression', 'fps'):
+            maximum = 2147483647 if key == 'seed' else 100 if key == 'output_compression' else 120 if key=='fps' else 10
+            if type(value) is not int or not (1 if key in ('n','fps') else 0) <= value <= maximum:
                 raise ValueError(key + ' 数值无效。')
+        elif key == 'guidance_scale':
+            if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=100:
+                raise ValueError('提示词引导系数需为 0–100 的有限数值；实际取值范围以平台文档为准。')
         elif key == 'speed':
             lower,upper=(0.5,2) if provider.get('protocol')=='minimax_speech' else (0.25,4)
             if type(value) not in (int,float) or not math.isfinite(value) or not lower<=value<=upper:raise ValueError(f'语速需在 {lower}–{upper} 之间。')
