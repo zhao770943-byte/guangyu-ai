@@ -224,7 +224,7 @@ def finish(value, expected_tokens=None, status='succeeded'):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         value = fetch('/api/jobs/' + value['id'])
-        if value['status'] not in ('queued', 'submitting', 'polling') and value.get('finished_at'):
+        if value['status'] not in ('queued', 'submitting', 'polling') and value.get('finished_at') and value.get('archive_status') != 'pending':
             break
         time.sleep(.04)
     assert value['status'] == status, value

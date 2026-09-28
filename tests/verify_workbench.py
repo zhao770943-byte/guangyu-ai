@@ -82,7 +82,7 @@ def create(p,prompt='fixture prompt',**kw):return call('/api/jobs',{'provider_id
 def finish(j,status='succeeded'):
     for _ in range(150):
         j=call('/api/jobs/'+j['id'])
-        if j['status'] not in ('queued','submitting','polling'):break
+        if j['status'] not in ('queued','submitting','polling') and j.get('archive_status')!='pending':break
         time.sleep(.1)
     assert j['status']==status,j
     return j
