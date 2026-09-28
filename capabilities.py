@@ -5,9 +5,9 @@ import copy
 
 FLAGS = ('reference_images', 'first_frame', 'last_frame', 'negative_prompt', 'seed',
          'aspect_ratio', 'quality', 'batch', 'background', 'resolution', 'camera',
-         'motion', 'strength', 'audio')
+         'motion', 'strength', 'audio', 'voice', 'speed')
 PARAMETERS = ('negative_prompt', 'seed', 'aspect_ratio', 'quality', 'n', 'background',
-              'resolution', 'camera', 'motion', 'strength', 'audio')
+              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed')
 VARIABLES = {flag: ('n' if flag == 'batch' else flag) for flag in FLAGS}
 
 
@@ -53,6 +53,10 @@ def effective(provider):
             caps['resolution'] = model.startswith('gemini-3')
     elif kind == 'video' and protocol == 'openai_video':
         caps['first_frame'] = True
+    elif kind == 'image' and protocol == 'minimax_image':
+        caps.update(aspect_ratio=True,batch=True)
+    elif kind == 'audio' and protocol in ('openai_speech','minimax_speech'):
+        caps.update(voice=True,speed=True)
     return caps
 
 
@@ -87,6 +91,8 @@ def validate_job(provider, input_assets, parameters, size='auto'):
     if not isinstance(parameters, dict) or set(parameters) - set(PARAMETERS):
         raise ValueError('包含未知的高级参数。')
     caps = effective(provider)
+    if provider.get('protocol')=='minimax_image' and size!='auto':
+        raise ValueError('MiniMax 图像接口请使用画幅比例，尺寸保持自动。')
     if provider.get('protocol')=='gemini' and provider.get('kind')=='image' and size!='auto':
         raise ValueError('Gemini 图像接口不使用精确像素尺寸，请将尺寸设为自动，并使用宽高比和分辨率选项。请求尚未发送。')
     refs = input_assets.get('references', [])
@@ -113,6 +119,9 @@ def validate_job(provider, input_assets, parameters, size='auto'):
             maximum = 2147483647 if key == 'seed' else 10
             if type(value) is not int or not (0 if key == 'seed' else 1) <= value <= maximum:
                 raise ValueError(key + ' 数值无效。')
+        elif key == 'speed':
+            lower,upper=(0.5,2) if provider.get('protocol')=='minimax_speech' else (0.25,4)
+            if type(value) not in (int,float) or not math.isfinite(value) or not lower<=value<=upper:raise ValueError(f'语速需在 {lower}–{upper} 之间。')
         elif key == 'strength':
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
                 raise ValueError('参考强度应为 0–1。')
@@ -125,6 +134,9 @@ def validate_job(provider, input_assets, parameters, size='auto'):
             if key == 'aspect_ratio' and not re.fullmatch(r'[1-9]\d?:[1-9]\d?', value):
                 raise ValueError('宽高比格式应为 16:9 或 1:1。')
         clean[key] = value
+    if provider.get('protocol')=='minimax_image':
+        ratios=('1:1','16:9','4:3','3:2','2:3','3:4','9:16')+(() if provider.get('model')=='image-01-live' else ('21:9',))
+        if clean.get('aspect_ratio','1:1') not in ratios or clean.get('n',1)>9:raise ValueError('MiniMax 图像宽高比或张数不受支持，张数最多 9。')
     if provider.get('protocol') == 'openai_image':
         model = provider.get('model', '').lower()
         qualities = ('standard', 'hd') if model == 'dall-e-3' else ('auto', 'low', 'medium', 'high')

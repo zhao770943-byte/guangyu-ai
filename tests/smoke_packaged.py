@@ -8,6 +8,8 @@ import base64
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import io
+import wave
 import os
 from pathlib import Path
 import shutil
@@ -27,6 +29,12 @@ ENTERED, RELEASE = threading.Event(), threading.Event()
 AUTHENTICATED = []
 UPSTREAM_CALLS = []
 PASSES = []
+
+def fixture_wav():
+    stream=io.BytesIO()
+    with wave.open(stream,'wb') as audio:
+        audio.setnchannels(1);audio.setsampwidth(2);audio.setframerate(16000);audio.writeframes(b'\0\0'*1600)
+    return stream.getvalue()
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -53,6 +61,9 @@ class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         UPSTREAM_CALLS.append(('POST', self.path))
         self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path == '/v1/audio/speech':
+            raw=fixture_wav();self.send_response(200);self.send_header('Content-Type','audio/wav')
+            self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path != '/v1/chat/completions':
             return self.send({'error': 'fixture not found'}, 404)
         AUTHENTICATED.append(self.headers.get('Authorization') == 'Bearer ' + KEY)
@@ -205,6 +216,21 @@ def main():
             csrf = request('/api/bootstrap')['csrf']
             request('/api/providers/check', {'id': provider['id']})
             check(AUTHENTICATED == [True, True, True, True] and request('/api/jobs/' + job['id'])['status'] == 'succeeded', 'Provider, encrypted key and completed history persist across restart')
+            audio_provider=request('/api/providers/save',{'name':'Packaged audio fixture','kind':'audio','protocol':'openai_speech',
+                'model':'tts-1','base_url':f'http://127.0.0.1:{fixture.server_port}/v1','allow_local':True})
+            audio_job=request('/api/jobs',{'provider_id':audio_provider['id'],'prompt':'Fixture audio playback'})
+            for _ in range(100):
+                audio_job=request('/api/jobs/'+audio_job['id'])
+                if audio_job['status'] in ('succeeded','failed','interrupted'):break
+                time.sleep(.1)
+            audio_asset=audio_job.get('result',{}).get('assets',[{}])[0]
+            check(audio_job['status']=='succeeded' and audio_asset.get('type')=='audio'
+                  and request(audio_asset['url'])==fixture_wav() and len(request('/audio.js'))>1000,
+                  'Packaged speech adapter saves playable WAV and serves audio workspace')
+            report=request('/api/usage?period=all')
+            check(report['summary']['audio_count']==1 and audio_job['usage']['total_tokens'] is None
+                  and UPSTREAM_CALLS.count(('POST','/v1/audio/speech'))==1,
+                  'Packaged audio counts outputs, preserves unknown tokens and submits once')
             run('--stop')
             alternate['GUANGYU_PORT'] = str(port)
             run(env=alternate)

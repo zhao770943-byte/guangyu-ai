@@ -2,7 +2,7 @@
 import base64, binascii, copy, json, re, socket, time
 import urllib.error, urllib.parse, urllib.request
 import storage, capabilities, uploads
-PROTOCOLS = {'image':{'openai_image','gemini','custom'},'video':{'openai_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'}}
+PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
 MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
@@ -84,7 +84,9 @@ def model_constraints(identity):
     kinds=[]
     if isinstance(identity,str):
         model=identity.strip().lower().removeprefix('models/').rsplit('/',1)[-1]
-        if re.match(r'^(?:gpt-image-|chatgpt-image-|dall-e-)\d',model) or model in ('image-01','image-01-live'):
+        if audio_task(model):
+            kinds=['audio']
+        elif re.match(r'^(?:gpt-image-|chatgpt-image-|dall-e-)\d',model) or model in ('image-01','image-01-live'):
             kinds=['image']
         elif re.match(r'^sora-\d',model):
             kinds=['video']
@@ -97,20 +99,31 @@ def model_constraints(identity):
                     or re.match(r'^deepseek-(?:chat|reasoner|[vr]\d)(?:[._-]|$)',model)):
                 kinds=['chat']
     reason={'chat':'该模型输出文本，图片或视频输入能力不代表可以生成图像或视频。',
-            'image':'该模型用于生成图像。','video':'该模型用于生成视频。'}.get(kinds[0],'') if len(kinds)==1 else ('该模型可用于图像生成和文本对话。' if kinds else '')
+            'image':'该模型用于生成图像。','video':'该模型用于生成视频。','audio':'该模型用于音频，请区分语音合成、识别与实时语音。'}.get(kinds[0],'') if len(kinds)==1 else ('该模型可用于图像生成和文本对话。' if kinds else '')
     return {'kinds':kinds,'reason':reason}
+
+def audio_task(identity):
+    model=str(identity or '').lower().rsplit('/',1)[-1]
+    if re.match(r'^(?:tts-\d|gpt-4o-mini-tts(?:-|$)|speech-\d)',model) or re.search(r'(?:^|[-_])tts(?:[-_]|$)',model):return 'speech'
+    if 'whisper' in model or 'transcrib' in model or re.search(r'(?:^|[-_])asr(?:[-_]|$)',model):return 'transcription'
+    if 'realtime' in model:return 'realtime'
+    if 'music' in model:return 'music'
+    if 'audio' in model:return 'conversation'
+    return ''
 
 def validate_model_kind(provider):
     constraints=model_constraints(provider.get('model'))
     if constraints['kinds'] and provider.get('kind') not in constraints['kinds']:
-        labels={'chat':'AI 助手（文本输出）','image':'图像','video':'视频'}
+        labels={'chat':'文本','image':'图像','video':'视频','audio':'音频'}
         expected=' / '.join(labels[kind] for kind in constraints['kinds'])
         actual=labels.get(provider.get('kind'),str(provider.get('kind')))
         raise ValueError(f"模型 {provider.get('model')} 支持的用途是 {expected}，不能用于{actual}。请编辑模型连接并修正用途。")
     if provider.get('kind')=='image' and provider.get('protocol')=='openai_image':
         hostname=urllib.parse.urlsplit(provider.get('base_url','')).hostname
         if hostname in ('api.minimax.cn','api.minimax.io'):
-            raise ValueError('MiniMax 官方图像接口使用 /image_generation，不支持 OpenAI Images 的 /images/generations。请使用自定义 JSON 映射配置该平台的图像接口。')
+            raise ValueError('MiniMax 官方图像接口使用 /image_generation，不支持 OpenAI Images 的 /images/generations。请选择 MiniMax 图像协议。')
+    if provider.get('protocol') in ('openai_speech','minimax_speech') and audio_task(provider.get('model')) not in ('','speech'):
+        raise ValueError('该型号不是语音合成模型，不能使用文字转语音接口。请更换语音合成型号。')
     return constraints
 
 def validate(p):
@@ -167,7 +180,7 @@ def headers(p):
             c=p['custom'];h[c.get('auth_header','Authorization')]=c.get('auth_prefix','Bearer ')+key
     elif key: h['Authorization']='Bearer '+key
     return h
-def request(p,path,payload=None,multipart=False):
+def request(p,path,payload=None,multipart=False,binary=False):
     h=headers(p);data=None
     if payload is not None:
         if multipart:
@@ -188,6 +201,7 @@ def request(p,path,payload=None,multipart=False):
     try:
         with OPENER.open(req,timeout=150) as response: raw=response.read(MAX_JSON+1)
         if len(raw)>MAX_JSON: raise ProviderError('模型响应超过 96 MiB，已停止读取。')
+        if binary:return raw
         try: result=json.loads(raw)
         except (ValueError,UnicodeDecodeError): raise ProviderError('接口未返回 JSON，请核对基础地址和协议。')
         if not isinstance(result,dict): raise ProviderError('接口响应必须为 JSON 对象。')
@@ -289,6 +303,15 @@ def build(p,job):
         if inputs['references']:
             path,multipart='/images/edits',True
             body['image' if model.lower()=='dall-e-2' else 'image[]']=[FilePart(identity) for identity in inputs['references']]
+    elif protocol=='minimax_image':
+        if len(prompt)>1500:raise ValueError('MiniMax 图像描述最多 1500 字符。')
+        path,body='/image_generation',{'model':model,'prompt':prompt,'response_format':'url',**params}
+    elif protocol in ('openai_speech','minimax_speech'):
+        if len(prompt)>(4096 if protocol=='openai_speech' else 9999):raise ValueError('语音文本超过当前接口长度限制。')
+        voice=params.get('voice') or p.get('extra',{}).get('voice') or ('alloy' if protocol=='openai_speech' else 'male-qn-qingse')
+        speed=params.get('speed',1)
+        if protocol=='openai_speech':path,body='/audio/speech',{'model':model,'input':prompt,'voice':voice,'speed':speed,'response_format':'wav'}
+        else:path,body='/t2a_v2',{'model':model,'text':prompt,'stream':False,'output_format':'url','voice_setting':{'voice_id':voice,'speed':speed,'vol':1,'pitch':0},'audio_setting':{'format':'mp3','sample_rate':32000,'bitrate':128000,'channel':1}}
     elif protocol=='openai_video':
         path,body,multipart='/videos',{'model':model,'prompt':prompt,'seconds':str(job.get('seconds',4))},True
         if job.get('size')!='auto':body['size']=job['size']
@@ -374,12 +397,20 @@ def media_url(value,kind):
     url=urllib.parse.urlsplit(value)
     if url.scheme not in ('https','http') or not url.hostname or url.username or url.password or any(ord(x)<32 for x in value):raise ProviderError('响应中的媒体 URL 无效。')
     return {'type':kind,'url':value,'local':False}
+
+def save_audio(raw,job_id):
+    if len(raw)<44 or raw[:4]!=b'RIFF' or raw[8:12]!=b'WAVE':raise ProviderError('语音接口未返回 WAV 音频，请核对模型与协议。')
+    name=job_id+'-'+storage.uid()[:8]+'.wav';path=storage.DATA/'media'/name;temp=path.with_suffix('.partial')
+    try:temp.write_bytes(raw);temp.replace(path)
+    finally:
+        if temp.exists():temp.unlink()
+    return {'type':'audio','url':'/media/'+name,'local':True}
 def extract(p,result,job_id):
     protocol,kind=p['protocol'],p['kind'];text='';assets=[]
     if protocol=='custom':
         c=p['custom'];raw_text=dig(result,c.get('text_path',''))
         if isinstance(raw_text,str):text=raw_text
-        if kind in ('image','video'):
+        if kind in ('image','video','audio'):
             url=dig(result,c.get('media_path',''))
             for item in url if isinstance(url,list) else ([url] if url else []):assets.append(media_url(item,kind))
             encoded=dig(result,c.get('base64_path',''))
@@ -402,6 +433,12 @@ def extract(p,result,job_id):
         for item in result.get('data',[]):
             if item.get('b64_json'):assets.append(save_image(item['b64_json'],job_id))
             elif item.get('url'):assets.append(media_url(item['url'],'image'))
+    elif protocol=='minimax_image':
+        for item in dig(result,'data.image_base64') or []:assets.append(save_image(item,job_id))
+        if not assets:
+            for item in dig(result,'data.image_urls') or []:assets.append(media_url(item,'image'))
+    elif protocol=='minimax_speech':
+        if dig(result,'data.audio'):assets.append(media_url(dig(result,'data.audio'),'audio'))
     return {'text':text.strip(),'assets':assets,**response_meta(p,result)}
 def download_video(p,identity,job_id):
     req=urllib.request.Request(endpoint(p,'/videos/'+urllib.parse.quote(str(identity),safe='')+'/content'),headers=headers(p))
@@ -454,11 +491,16 @@ def poll(p,job,initial=None):
 def execute(p,job,resume=False):
     if resume:return poll(p,job)
     path,body,multipart=build(p,job)
+    if p['protocol']=='openai_speech':
+        raw=request(p,path,body,binary=True)
+        return {'text':'','assets':[save_audio(raw,job['id'])],**response_meta(p,{})}
     try:result=request(p,path,body,multipart)
     except ProviderError as ex:
         if ex.response:record_response(p,job['id'],ex.response)
         raise
     metadata=record_response(p,job['id'],result)
+    if p['protocol'].startswith('minimax_') and dig(result,'base_resp.status_code') not in (None,0):
+        raise ProviderError('MiniMax 返回错误：'+clean_error(dig(result,'base_resp.status_msg') or '请求失败',p),response=result)
     if p['protocol']=='openai_video':
         identity=result.get('id')
         if not identity:raise ProviderError('视频响应缺少任务 ID，请核对协议。')

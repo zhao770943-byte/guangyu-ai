@@ -107,7 +107,7 @@ def _empty_metrics():
         'cached_input_tokens': None, 'reasoning_tokens': None,
         'usage_reported_requests': 0, 'usage_missing_requests': 0,
         'token_complete_requests': 0, 'token_incomplete_requests': 0,
-        'image_count': 0, 'video_count': 0, 'video_seconds': None,
+        'image_count': 0, 'video_count': 0, 'audio_count': 0, 'video_seconds': None,
         'requested_video_seconds': 0,
         '_latencies': [],
     }
@@ -147,6 +147,7 @@ def _accumulate(metrics, job, tokens, elapsed):
     videos = [asset for asset in assets if isinstance(asset, dict) and asset.get('type') == 'video']
     metrics['image_count'] += len(images)
     metrics['video_count'] += len(videos)
+    metrics['audio_count'] += len([asset for asset in assets if isinstance(asset,dict) and asset.get('type')=='audio'])
     if videos:
         requested = _number(job.get('seconds'))
         if requested is not None:

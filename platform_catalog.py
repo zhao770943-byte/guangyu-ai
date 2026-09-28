@@ -83,6 +83,30 @@ PRESETS = [
      'docs_url': ''},
 ]
 
+# Catalog types describe the vendor directory, not a claim of native protocol
+# compatibility. The actual returned model determines its adapter and subtype.
+CATALOG_TYPES={
+    'openai':['chat','audio','image','video'], 'anthropic':['chat'],
+    'gemini':['chat','audio','image','video'], 'deepseek':['chat'],
+    'siliconflow':['chat','audio','image','video'], 'openrouter':['chat','audio','image','video'],
+    'xai':['chat','audio','image','video'], 'ollama':['chat'], 'lmstudio':['chat'],
+    'moonshot':['chat'], 'dashscope':['chat','audio','image','video'],
+    'zhipu':['chat','audio','image','video'], 'minimax':['chat','audio','image','video'],
+    'ark':['chat','audio','image','video'], 'custom':['chat','audio','image','video'],
+}
+for item in PRESETS:
+    item['model_types']=CATALOG_TYPES[item['id']]
+    if item['id'] in ('openai','custom'):item['protocols']['audio']='openai_speech'
+    if item['id']=='minimax':
+        item['protocols'].update(image='minimax_image',audio='minimax_speech')
+        item['note']='M 系列用于文本；image-01 用于图像；speech 系列用于语音合成。视频与其他音频子类型需要对应适配。'
+        item['official_models']=[{'id':name,'name':name,'model_kinds':[kind],'supported_kinds':[kind],
+            'model_constraints':{'kinds':[kind]},'protocol':protocol,'source':'official_catalog',
+            'audio_task':'speech' if kind=='audio' else ''}
+            for kind,protocol,names in [('image','minimax_image',['image-01','image-01-live']),
+            ('audio','minimax_speech',['speech-2.8-hd','speech-2.8-turbo','speech-2.6-hd','speech-2.6-turbo','speech-02-hd','speech-02-turbo','speech-01-hd','speech-01-turbo'])]
+            for name in names]
+
 
 def get_preset(preset_id):
     return deepcopy(next((item for item in PRESETS if item['id'] == preset_id), None))

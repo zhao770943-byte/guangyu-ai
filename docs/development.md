@@ -26,7 +26,7 @@ py -3 -m venv .venv
 | `storage.py` | SQLite 和 Windows DPAPI |
 | `usage.py` | 本机用量聚合与 CSV |
 | `public/` | 原生 HTML、CSS、JavaScript |
-| `public/connections.js` / `public/connections.css` | 模型管理表格、两步接入向导与按需展开的高级配置 |
+| `public/connections.js` / `public/connections.css` | 模型管理表格、类型、厂商、型号三步接入向导与按需展开的高级配置 |
 | `tests/` | 单元测试与隔离 HTTP 模拟接口 |
 
 协议适配时同时更新能力声明、请求构建、响应提取与用量字段。所有新增生成行为应由用户主动发起；不要因为临时网络失败自动重试付费 POST。

@@ -7,7 +7,7 @@ import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
 import providers, storage, capabilities, uploads, usage, model_catalog
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '2.2.2'
+VERSION = '2.3.0'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)
@@ -23,7 +23,7 @@ def run_job(identity,resume=False):
         job=storage.update_job(identity,status='polling' if resume else 'submitting',started_at=job.get('started_at') or storage.now(),finished_at=None)
         result=providers.execute(p,job,resume)
         if job['kind']=='chat' and not result['text']:raise providers.ProviderError('平台未返回可显示文本。可能是字段不匹配或内容被平台拦截。')
-        if job['kind'] in ('image','video') and not result['assets']:raise providers.ProviderError('平台没有返回图像或视频。请核对字段、模型能力或平台内容限制。')
+        if job['kind'] in ('image','video','audio') and not result['assets']:raise providers.ProviderError('平台没有返回媒体内容。请核对字段、模型能力或平台内容限制。')
         if job.get('conversation_id'):
             with storage.LOCK:
                 conv=storage.get('conversations',job['conversation_id']);conv['messages'].append({'role':'assistant','content':result['text'],'job_id':identity});conv['updated_at']=storage.now();storage.put('conversations',conv)
@@ -158,9 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_file(storage.DATA/'uploads'/filename)
             if path.startswith('/media/'):
                 filename=path[7:]
-                if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4)',filename):return self.json_response({'error':'文件不存在。'},404)
+                if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|wav)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
-            static={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
+            static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return

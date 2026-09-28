@@ -23,7 +23,7 @@ MAX_MODELS = 1000
 MAX_PAGES = 10
 TIMEOUT = 15
 TOTAL_TIMEOUT = 45
-KINDS = {'chat', 'image', 'video'}
+KINDS = {'chat', 'image', 'video', 'audio'}
 PROTOCOLS = set().union(*providers.PROTOCOLS.values())
 CAVEAT = '列表来自当前地址的只读模型接口；列出模型不代表已验证生成权限、余额或全部能力。用途按已适配模型系列提示，未知用途需确认用途与协议；专有接口可使用自定义 JSON 映射。'
 
@@ -154,6 +154,7 @@ def _request(provider, path, key, timeout):
 def _suggestions(identity, item, family, provider):
     """Conservative protocol hints; never trust returned endpoint URLs."""
     model = identity.lower().removeprefix('models/')
+    if providers.audio_task(identity) and family in ('gemini','anthropic'):return ['audio'],None
     if family == 'anthropic':
         return ['chat'], 'anthropic'
     if family == 'gemini':
@@ -164,6 +165,13 @@ def _suggestions(identity, item, family, provider):
             return ['image', 'chat'], 'gemini'
         return ['chat'], 'gemini'
     leaf = model.rsplit('/', 1)[-1]
+    task=providers.audio_task(identity)
+    if task:
+        if task=='speech':
+            protocol='minimax_speech' if leaf.startswith('speech-') and provider.get('platform')=='minimax' else ('openai_speech' if leaf.startswith(('tts-','gpt-4o-mini-tts')) else None)
+            return ['audio'],protocol
+        return ['audio'],None
+    if leaf in ('image-01','image-01-live') and provider.get('platform')=='minimax':return ['image'],'minimax_image'
     if leaf.startswith(('gpt-image-', 'chatgpt-image-', 'dall-e-')):
         return ['image'], 'openai_image'
     if leaf.startswith('sora-'):
@@ -197,6 +205,18 @@ def _normalize(values, family, provider, key):
             malformed += 1
             continue
         kinds, protocol = _suggestions(identity, item, family, provider)
+        # Classification is separate from an installed generation adapter.
+        constraints=providers.model_constraints(identity)
+        classified=constraints['kinds'] or kinds
+        leaf=identity.lower().rsplit('/',1)[-1]
+        if not classified:
+            if any(x in leaf for x in ('video','hailuo','veo','wan2','wan-','seedance','kling')):classified=['video']
+            elif any(x in leaf for x in ('image','flux','stable-diffusion','sdxl','imagen')):classified=['image']
+        architecture=item.get('architecture') if isinstance(item.get('architecture'),dict) else {}
+        output=architecture.get('output_modalities',item.get('output_modalities',[]))
+        if not constraints['kinds'] and isinstance(output,list):
+            explicit=[{'text':'chat','image':'image','audio':'audio','video':'video'}[m] for m in output if isinstance(m,str) and m in ('text','image','audio','video')]
+            if explicit:classified=list(dict.fromkeys(explicit))
         if provider['protocol'] == 'custom' and protocol:
             protocol = 'custom'
         elif selected:
@@ -207,7 +227,7 @@ def _normalize(values, family, provider, key):
         label = label if isinstance(label, str) and label.strip() else identity
         entry = {'id': identity, 'name': _redact(label, key, 240), 'supported_kinds': kinds,
                  'protocol': protocol, 'base_url': provider['base_url'],
-                 'model_constraints': providers.model_constraints(identity)}
+                 'model_constraints': constraints, 'model_kinds':classified,'audio_task':providers.audio_task(identity)}
         if isinstance(item.get('description'), str):
             entry['description'] = _redact(item['description'], key, 600)
         normalized.append(entry)

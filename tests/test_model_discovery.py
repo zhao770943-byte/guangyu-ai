@@ -264,13 +264,13 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(body['model'], 'private-output-workflow')
         self.assertFalse(CALLS)
 
-    def test_official_minimax_image_endpoint_requires_custom_mapping_but_proxy_is_allowed(self):
+    def test_official_minimax_image_requires_native_or_custom_adapter_but_proxy_is_allowed(self):
         for hostname in ('api.minimax.cn', 'api.minimax.io'):
             error = self.api('/api/providers/save', {**self.config(protocol='openai_image'),
                              'name': 'Wrong MiniMax adapter', 'kind': 'image', 'model': 'image-01',
                              'base_url': 'https://' + hostname + '/v1'}, 400)
             self.assertIn('/image_generation', error['error'])
-            self.assertIn('自定义 JSON', error['error'])
+            self.assertIn('MiniMax 图像协议', error['error'])
         proxy = self.save(protocol='openai_image', kind='image', model='image-01',
                           base_url='https://minimax.proxy.example/v1')
         self.assertEqual(proxy['protocol'], 'openai_image')

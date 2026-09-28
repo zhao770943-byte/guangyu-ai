@@ -4,44 +4,26 @@
 
 常用服务的 API 前缀、模型列表路径和认证差异见 [平台地址与模型发现依据](provider-catalog.md)。目录列出了经官方文档核对的端点；列表可见不等于账号有额度，也不等于本应用支持模型的全部生成协议。
 
-## 第一步：连接平台
+## 类型、厂商、型号
 
-1. 选择“模型平台”。预设填入对应 API 基础地址；自己的代理、地区或专属地址可以修改。
-2. 填写 API Key 并核对 URL。本机免鉴权服务可以留空；编辑同地址的已有连接时，也可留空复用已保存密钥。
-3. 点击底部“一键获取模型”，成功后进入第二步。需要调整模型目录协议或回环 HTTP 时，展开“连接选项”。
+1. **选择类型**：文本、音频、图像、视频。以输出用途分类，多模态输入不等于能够生成图像或视频。
+2. **连接厂商**：按类型列出厂商，自动填入 API 基础地址，提供官方密钥页面直达链接。填写 Key 后点击“一键获取模型”。自定义地址、目录协议、认证与回环 HTTP 在连接选项中配置。
+3. **选择型号**：只显示已识别为当前类型的目录条目。选择型号保持类型不变，并匹配已适配协议及请求路径。未知类型默认隐藏，可主动展开并确认类型；缺少原生适配器时使用自定义 JSON 映射。
 
-选择平台后，平台下方提供“获取 API Key”官方链接，在新标签页打开；Ollama 与 LM Studio 提供本机服务下载入口。应用只提供入口，不代为申请密钥或购买额度。自定义平台请使用服务商自己的官方入口。
+目录读取是显式 GET 操作，不提交生成、不自动保存新密钥。真实目录为空或错误时显示实际结果。MiniMax 另提供按官方文档维护的图像和语音合成公开清单，需主动点击“查看官方型号”；界面明确提示未验证当前密钥权限，不会冒充账户返回结果。
 
-输入或离开 Key 输入框不会发起列表请求。读取由“一键获取模型”明确触发，所有平台预设都保留此操作；第二步也可点击同名按钮重新获取。新增连接无需填写模型 ID，直接从平台返回的目录选择。
+模型分类与协议支持分开记录。语音合成、语音识别、实时语音、音频对话不会混用；目前原生音频适配器只支持语音合成。其他音频子类型标记“待适配”，不允许通过语音合成界面提交。
 
-“连接选项”中的**模型目录协议**专门控制读取列表所用的格式与鉴权，可与第二步的**生成接口协议**不同，并随连接保存。例如，某个平台使用自定义 JSON 读取目录、OpenAI Images 生成图像，可以分别设置这两种协议；读取目录的设置不会增加新的生成适配器。
+切换类型会重新选择型号。切换厂商或修改基础地址会清空输入密钥；保存的密钥只有同地址编辑时允许留空复用。模型返回的域名不会覆盖用户选择的基础地址。
 
-## 第二步：选择模型
-
-左侧按模型名称或 ID 搜索，点击条目后，在右侧“连接预览”中确认：
-
-- **连接名称**：默认使用模型名称，可修改为自己的名称；编辑旧连接时保留已有名称。
-- **模型用途**：已识别的模型会匹配图像、视频或 AI 助手；未知模型显示“用途待确认”，必须主动选择用途才能保存。
-- **协议与请求地址**：默认收起，展开后可以核对或修改接口协议，并查看完整请求 URL。模型目录可见不代表其生成接口已适配。
-
-确认后点击“接入所选模型”；编辑已有连接时按钮为“保存修改”。新增向导实际分为两个独立步骤，第一步不会展示要求用户填完全部生成映射的长表单。
-
-列表中找不到时，可更换搜索词或重新获取；读取失败时按错误提示检查基础地址、密钥权限和模型目录设置。若需要自定义认证、附加 JSON、首尾帧能力或响应字段，按需打开“高级参数与映射”；完成配置后返回向导重新获取并选择模型。高级配置默认收起，标准接口通常无需修改。
-
-14 个平台预设均按当前 API 基础地址尝试获取目录，不因平台名称提前阻止请求。OpenAI 兼容目录默认使用 `/models`，Anthropic 与 Gemini 使用对应格式和认证；自定义目录可设置其他相对路径。部分官方入口可能没有模型列表，预设可发起读取并不保证每个平台都能返回目录。
-
-列表读取属于 GET 请求，不发起生成，也不在保存前持久化新输入的密钥。它可能仍受平台网络、权限和速率限制影响。没有列表、返回为空或读取失败时会显示实际错误或空状态，并提供重新获取操作；不会补入虚构的候选模型。新增连接需要获取到目录条目才能选择并保存。已有连接编辑时可保留原模型。
-
-切换平台或修改基础地址会清空当前输入的密钥。编辑已保存连接时，只有地址未变才允许复用其加密密钥；更换地址后应重新填写对应平台的密钥。不会按模型名称自动把密钥转发到另一个域名。
-
-模型列表读取有资源上限：最多 10 页、1000 个模型，单页响应最多 4 MiB、累计最多 12 MiB；单次 GET 超时 15 秒，整次发现的逻辑时间预算 45 秒。超过范围时不能把已显示列表当作该平台全部模型，应按提示核对目录服务。
+目录上限为 10 页、1000 个模型，单页最多 4 MiB、累计最多 12 MiB；单次 GET 超时 15 秒，整次逻辑预算 45 秒。达到上限时会提示部分结果。平台是否提供目录和模型权限以账户的实际响应为准。
 
 ## 基础信息
 
 | 字段 | 填写方式 |
 | --- | --- |
 | 名称 | 方便自己识别的平台与模型名称 |
-| 用途 | 图像、视频或助手 |
+| 用途 | 文本、音频、图像或视频 |
 | 协议 | 预设与已识别模型会匹配协议；仍需核对平台实际支持的接口，未知模型需主动确认 |
 | API 基础地址 | 平台 API 前缀，例如 `https://api.example.com/v1`；不要重复填写 `/chat/completions` 等路径 |
 | 模型 ID | 从目录所选条目自动带入，不一定等于网页展示名称，无需手填 |
@@ -51,20 +33,23 @@
 
 ## 管理已有模型
 
-“模型接入”使用表格显示连接名称、模型 ID、基础地址、用途与协议，可按图像、视频、AI 助手筛选，并搜索名称、ID 或地址。每行提供“获取模型”、编辑和移除操作；点击“获取模型”会直接打开向导并读取该连接的目录。
+“模型接入”使用表格显示连接名称、模型 ID、基础地址、用途与协议，可按文本、音频、图像、视频筛选，并搜索名称、ID 或地址。每行提供“获取模型”、编辑和移除操作；点击“获取模型”会直接打开向导并读取该连接的目录。
 
-点击“编辑”会直接打开第二步，保留当前模型与连接名称，即使原模型暂未出现在目录中也可继续编辑；需要修改平台、Key 或地址时返回第一步。修改地址后需重新填写对应密钥并重新获取模型。管理页底部可前往“模型与用量”查看保存的调用记录。
+点击“编辑”会直接打开第三步，保留当前模型与连接名称，即使原模型暂未出现在目录中也可继续编辑；需要修改平台、Key 或地址时返回第二步。修改地址后需重新填写对应密钥并重新获取模型。管理页底部可前往“模型与用量”查看保存的调用记录。
 
 ## 内置协议与高级能力
 
 | 适配器 | 用途 | 本实现的高级输入 |
 | --- | --- | --- |
 | OpenAI Images | 图像 | 已识别 GPT Image 系列参考图、质量、张数、背景；DALL·E 2 单张编辑；DALL·E 3 质量 |
+| MiniMax 图像 | 图像 | `/image_generation`，画幅比例与张数；返回图片链接 |
+| OpenAI Speech | 音频 | `/audio/speech`，音色与语速，WAV 本机保存 |
+| MiniMax 语音 | 音频 | `/t2a_v2`，音色与语速，返回音频链接 |
 | OpenAI Videos | 视频 | 首帧；没有原生尾帧控制 |
 | OpenAI Chat Completions / Responses | 助手 | 多轮文本、应用说明与用户选择的草稿上下文 |
 | Anthropic Messages | 助手 | 多轮文本与系统说明 |
 | Gemini generateContent | 图像／助手 | 图像参考输入；已识别图像型号的宽高比、Gemini 3 图像型号的分辨率 |
-| 自定义 JSON | 三种用途 | 根据实际请求模板声明和映射能力 |
+| 自定义 JSON | 四种用途 | 根据实际请求模板声明和映射能力 |
 
 上表描述应用的适配行为，不保证供应商当前向你的账号开放该功能。兼容平台若使用不同字段，请选择自定义映射或增加适配器。未识别的 OpenAI Images 兼容模型仅开放基础控制。
 
@@ -74,11 +59,19 @@
 
 `MiniMax-M3` 在本应用中应配置为 **AI 助手 → OpenAI Chat Completions**，API 基础地址为 `https://api.minimax.cn/v1`。官方文档描述的图片、视频能力是多模态输入，用于理解内容；聊天结果从 `choices[].message.content` 读取，不应把该模型配置为 OpenAI Images。当前助手界面提供多轮文本输入，供应商支持的其他输入能力需要应用另外适配。[MiniMax OpenAI SDK 文档](https://platform.minimax.cn/docs/api-reference/text-openai-api)
 
-MiniMax 中国区文生图接口列出的模型为 `image-01` 和 `image-01-live`，使用 Bearer 鉴权与 `POST /image_generation` JSON 请求。它的路径和响应结构与 OpenAI Images 不同：图片 URL 位于 `data.image_urls`，Base64 图片位于 `data.image_base64`，还需检查 `base_resp.status_code` 是否为 `0`。接入这类模型需要匹配的专有适配器或自定义 JSON 映射，不能仅更换模型 ID 沿用 OpenAI Images。[MiniMax 文生图接口](https://platform.minimax.cn/docs/api-reference/image-generation-t2i)、[图片生成指南](https://platform.minimax.cn/docs/guides/image-generation)
+MiniMax 中国区文生图接口列出的模型为 `image-01` 和 `image-01-live`，使用 Bearer 鉴权与 `POST /image_generation` JSON 请求。它的路径和响应结构与 OpenAI Images 不同：图片 URL 位于 `data.image_urls`，Base64 图片位于 `data.image_base64`，还需检查 `base_resp.status_code` 是否为 `0`。本版已内置 MiniMax 图像适配器，自动使用此路径、解析图片 URL 并检查业务状态；不能仅更换模型 ID 沿用 OpenAI Images。[MiniMax 文生图接口](https://platform.minimax.cn/docs/api-reference/image-generation-t2i)、[图片生成指南](https://platform.minimax.cn/docs/guides/image-generation)
 
 国际站文生图文档使用 `https://api.minimax.io/v1/image_generation`，目前只列出 `image-01`。应按账号所在站点核对模型与地址，不自动跨站切换密钥。[国际站文生图接口](https://platform.minimax.io/docs/api-reference/image-generation-t2i)
 
-官方 `GET /models` 与 `GET /models/{model_id}` 提供模型身份字段，公开结构未声明输出模态；列表包含 M3 并不意味着它可以生图。实际可选条目仍以自己的目录返回结果为准。[模型列表](https://platform.minimax.cn/docs/api-reference/models/openai/list-models)、[模型详情](https://platform.minimax.cn/docs/api-reference/models/openai/retrieve-model)
+官方 `GET /models` 与 `GET /models/{model_id}` 提供模型身份字段，公开结构未声明输出模态；列表包含 M3 并不意味着它可以生图。账户目录不含图像和语音时，可以主动打开单独标注的官方公开清单；是否有权限仍以账户为准。[模型列表](https://platform.minimax.cn/docs/api-reference/models/openai/list-models)、[模型详情](https://platform.minimax.cn/docs/api-reference/models/openai/retrieve-model)
+
+## 音频接口
+
+OpenAI Speech 使用 `POST /audio/speech`，传递 `model/input/voice/speed/response_format=wav`，文本最多 4096 字符，语速 0.25–4；响应二进制 WAV 保存到本机媒体目录供播放和下载。没有 JSON 用量时保留未知 Token。[OpenAI 官方接口](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)
+
+MiniMax 同步语音使用 `POST /t2a_v2`，传递 `model/text/stream=false`、`voice_setting`、`audio_setting` 和 `output_format=url`；文本少于 10000 字符，语速 0.5–2。解析 `data.audio`，并检查 `base_resp.status_code`。平台返回的临时链接可能过期。[MiniMax 同步语音文档](https://platform.minimax.cn/docs/api-reference/speech-t2a-http)
+
+上述原生适配器不实现转写、实时通话和音乐生成。自定义 JSON 音频支持媒体 URL 与 GET 轮询，需要按平台文档映射。
 
 ## 自定义 JSON
 
