@@ -109,6 +109,12 @@ class Fixture(BaseHTTPRequestHandler):
             return self.send({'data': [{'id': 'gpt-dual-fixture'}]})
         if parsed.path == '/single/models':
             return self.send({'data': [{'id': 'gpt-single'}]})
+        if parsed.path == '/typed-array/models':
+            return self.send([{'id':'vendor/new-text','type':'chat'},
+                              {'id':'vendor/new-picture','type':'image'},
+                              {'id':'vendor/new-voice','type':'text-to-speech'},
+                              {'id':'vendor/new-asr','type':'speech-to-text'},
+                              {'id':'vendor/new-movie','type':'video'}])
         if parsed.path == '/minimax/models':
             return self.send({'data': [{'id': 'MiniMax-M3'}, {'id': 'MiniMax-M2.5'},
                                       {'id': 'image-01'}, {'id': 'vendor-private-model'}]})
@@ -501,10 +507,16 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(all(call['method'] == 'GET' for call in CALLS))
 
     def test_model_discovery_csrf_origin_host_guards(self):
-        body = self.config()
-        self.api('/api/models/discover', body, 403, {'X-CSRF-Token': ''})
-        self.api('/api/models/discover', body, 403, {'Origin': 'https://evil.invalid'})
-        self.api('/api/models/discover', body, 403, {'Host': 'evil.invalid'})
+        # Guards run before body parsing. A zero-length POST avoids Windows
+        # resetting the socket when the server rejects headers while urllib
+        # is still sending a body. Still require an actual HTTP 403 response.
+        for invalid in ({'X-CSRF-Token':''},{'Origin':'https://evil.invalid'},{'Host':'evil.invalid'}):
+            request=urllib.request.Request(self.origin+'/api/models/discover',data=b'',
+                headers={'Origin':self.origin,'X-CSRF-Token':server.CSRF,**invalid})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request,timeout=5)
+            self.assertEqual(caught.exception.code,403)
+            self.assertIn('error',json.load(caught.exception))
         self.assertFalse(CALLS)
 
     def test_platform_catalog_and_existing_provider_check_contract(self):
@@ -533,6 +545,10 @@ class DiscoveryTests(unittest.TestCase):
             'zhipu': 'bigmodel.cn',
             'minimax': 'platform.minimax.cn',
             'ark': 'console.volcengine.com',
+            'groq':'console.groq.com', 'cerebras':'cloud.cerebras.ai',
+            'mistral':'console.mistral.ai', 'together':'api.together.ai',
+            'fireworks':'fireworks.ai', 'sambanova':'cloud.sambanova.ai',
+            'nvidia':'build.nvidia.com', 'deepinfra':'deepinfra.com',
         }
         catalog = {item['id']: item for item in self.api('/api/platforms')['platforms']}
         self.assertEqual(set(catalog), set(official_hosts) | {'custom'})
@@ -553,6 +569,39 @@ class DiscoveryTests(unittest.TestCase):
         self.assertFalse(catalog['custom'].get('api_key_url'))
         self.assertFalse(catalog['custom'].get('api_key_label'))
         self.assertFalse(CALLS)
+
+    def test_array_catalog_and_explicit_task_classification(self):
+        result=self.discover('/typed-array',platform='together')
+        models=result['models']
+        self.assertEqual([m['model_kinds'] for m in models],[['chat'],['image'],['audio'],['audio'],['video']])
+        self.assertEqual(models[0]['protocol'],'openai_chat')
+        self.assertTrue(all(m['protocol'] is None for m in models[1:]))
+        self.assertEqual(models[2]['audio_task'],'speech')
+        self.assertEqual(models[3]['audio_task'],'transcription')
+        self.assertEqual(len(CALLS),1)
+        self.assertEqual(CALLS[0]['method'],'GET')
+
+    def test_catalog_output_types_and_adapter_metadata(self):
+        catalog={p['id']:p for p in self.api('/api/platforms')['platforms']}
+        self.assertEqual(len(catalog),24)
+        for identity in ('anthropic','deepseek','moonshot','cerebras','sambanova','nvidia'):
+            self.assertEqual(catalog[identity]['model_types'],['chat'])
+        self.assertEqual(catalog['groq']['model_types'],['chat','audio'])
+        self.assertEqual(catalog['mistral']['model_types'],['chat','audio'])
+        self.assertNotIn('video',catalog['openrouter']['model_types'])
+        for item in catalog.values():
+            self.assertTrue(set(item['protocols'])<=set(item['model_types']))
+            for kind,protocol in item['protocols'].items():
+                self.assertIn(protocol,providers.PROTOCOLS[kind])
+
+    def test_new_vendor_model_families_do_not_confuse_vision_with_generation(self):
+        config={'platform':'mistral','protocol':'openai_chat','base_url':'https://api.mistral.ai/v1'}
+        models,_=model_catalog._normalize([{'id':'ministral-8b-latest'},
+            {'id':'codestral-latest'}, {'id':'voxtral-mini-latest'},
+            {'id':'voxtral-mini-transcribe-latest'}, {'id':'voxtral-mini-tts'}],'openai',config,'')
+        self.assertEqual([m['model_kinds'] for m in models],[['chat'],['chat'],['audio'],['audio'],['audio']])
+        self.assertEqual([m['audio_task'] for m in models[2:]],['conversation','transcription','speech'])
+        self.assertTrue(all(m['protocol'] is None for m in models[2:]))
 
 
 if __name__ == '__main__':

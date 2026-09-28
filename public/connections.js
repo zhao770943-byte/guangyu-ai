@@ -54,6 +54,8 @@ function connectionAdvancedHTML(p){
 const modelTypeLabels={chat:'文本',audio:'音频',image:'图像',video:'视频'};
 const modelTypeNotes={chat:'对话、答疑与文本创作',audio:'语音合成与音频模型',image:'文字生图与参考图创作',video:'视频生成与镜头创作'};
 const audioTaskLabels={speech:'语音合成',transcription:'语音识别',realtime:'实时语音',music:'音乐',conversation:'音频对话'};
+function platformsForKind(platforms,kind){return platforms.filter(p=>p.id==='custom'||p.model_types?.includes(kind))}
+function platformSupportLabel(p,kind){return p.id==='custom'?'自定义接入':p.protocols?.[kind]?'已有接口适配':'需配置专用接口'}
 async function editProvider(id,kind,{autoDiscover=false}={}){
   closeAssistant();const openVersion=++connectionOpenVersion;
   let platforms;try{platforms=(await api('/api/platforms')).platforms}catch(err){if(openVersion===connectionOpenVersion)toast(err.message);return}
@@ -65,7 +67,8 @@ async function editProvider(id,kind,{autoDiscover=false}={}){
   <input type="hidden" name="id" value="${original?.id||''}"><input type="hidden" name="model" value="${esc(original?.model||'')}"><input type="hidden" name="kind" value="${defaultKind}">
   <div class="connection-body"><section id="connection-type-pane" class="connection-type-pane"><h3>你要接入哪类模型？</h3><p>厂商与型号会按所选类型筛选。</p><div class="connection-type-grid">${Object.entries(modelTypeLabels).map(([k,label])=>`<button type="button" class="connection-type-card" data-model-type="${k}" aria-pressed="false">${icon(k==='chat'?'assistant':k)}<strong>${label}模型</strong><span>${modelTypeNotes[k]}</span>${icon('check','type-check')}</button>`).join('')}</div></section>
   <section id="connection-platform-pane" class="connection-platform-pane" hidden><div class="connection-scope"><span id="connection-scope-label"></span><button type="button" class="text-button" id="connection-change-type">更改类型</button></div>
-  <label>模型厂商<select name="platform"></select></label>
+  <label><span class="connection-label-row">模型厂商 <span id="connection-platform-count"></span></span><select name="platform"></select></label>
+  <div id="connection-platform-support" class="connection-platform-support" aria-live="polite"></div>
   <div class="connection-platform-access" id="connection-platform-access" hidden><span id="connection-platform-access-note">还没有 API Key？</span><a id="connection-api-key-link" href="#" target="_blank" rel="noopener noreferrer">获取 API Key ${icon('arrow')}</a></div>
   <label>API Key <span class="connection-optional" id="connection-key-note"></span><div class="connection-secret"><input name="api_key" type="password" autocomplete="new-password" placeholder="粘贴当前厂商的 API Key"><button type="button" id="connection-key-toggle" aria-label="显示密钥">显示</button></div></label>
   <label><span class="connection-label-row">API 基础地址 <span>由厂商自动填写，可修改</span></span><input name="base_url" type="url" value="${esc(original?.base_url||'')}" placeholder="https://api.example.com/v1" spellcheck="false"></label><p class="connection-platform-hint" id="connection-platform-hint"></p><p class="connection-platform-hint" id="connection-directory-preview" aria-live="polite"></p>
@@ -99,7 +102,14 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   function error(message=''){el('connection-error').hidden=!message;el('connection-error').textContent=message}
   function endpoint(){const base=canonical(f('base_url').value),selected=f('model').value;el('connection-directory-preview').textContent=base?'模型目录请求：GET '+base+'/'+(f('discovery_path').value||'/models').replace(/^\//,''):'填写 API 基础地址后，将自动请求模型目录。';const suffix={openai_chat:'/chat/completions',openai_responses:'/responses',openai_image:'/images/generations',minimax_image:'/image_generation',openai_video:'/videos',weijin_video:'/videos',openai_speech:'/audio/speech',minimax_speech:'/t2a_v2',anthropic:'/messages',gemini:'/models/'+encodeURIComponent(selected.replace(/^models\//,''))+':generateContent',custom:f('submit_path').value}[f('protocol').value];el('connection-request-url').textContent=base&&suffix?base+'/'+suffix.replace(/^\//,''):'按厂商文档配置提交路径';el('connection-custom-fields').hidden=f('protocol').value!=='custom'&&f('discovery_protocol').value!=='custom'}
   function protocols(value){f('protocol').innerHTML=(protocolOptions[f('kind').value]||[]).map(p=>`<option value="${p}" ${p===value?'selected':''}>${protocolNames[p]}</option>`).join('');endpoint()}
-  function platformOptions(preferred){const available=platforms.filter(p=>p.model_types?.includes(f('kind').value)||p.id==='custom'||p.id===original?.platform);f('platform').innerHTML=available.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');if(available.some(p=>p.id===preferred))f('platform').value=preferred}
+  function platformOptions(preferred){
+    const kind=f('kind').value,available=platformsForKind(platforms,kind);
+    const groups=[['已有接口适配',p=>p.id!=='custom'&&p.protocols?.[kind]],['专用接口 · 需配置',p=>p.id!=='custom'&&!p.protocols?.[kind]],['其他',p=>p.id==='custom']];
+    f('platform').innerHTML=groups.map(([label,match])=>{const items=available.filter(match);return items.length?`<optgroup label="${label}">${items.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>`:''}).join('');
+    if(available.some(p=>p.id===preferred))f('platform').value=preferred;
+    else f('platform').value=available.find(p=>p.id!=='custom'&&p.protocols?.[kind])?.id||available[0]?.id||'';
+    el('connection-platform-count').textContent=`${available.filter(p=>p.id!=='custom').length} 个匹配平台`;
+  }
   function platformNote(){const selected=platform(),link=el('connection-api-key-link');el('connection-platform-access').hidden=!selected?.api_key_url;link.href=selected?.api_key_url||'#';link.innerHTML=esc(selected?.api_key_label||'获取 API Key')+' '+icon('arrow');el('connection-platform-access-note').textContent=selected?.allow_local?'尚未安装本机服务？':'还没有 API Key？';el('connection-key-note').textContent=original?.has_key&&canonical(original.base_url)===canonical(f('base_url').value)?'已保存，可留空复用':selected?.allow_local?'本机无鉴权可留空':'';el('connection-platform-hint').textContent=selected?.note||'填写服务商提供的 API 基础地址。';el('connection-scope-label').textContent=modelTypeLabels[f('kind').value]+'模型';el('connection-official-first').hidden=!officialModels().length;el('connection-official-models').hidden=!officialModels().length||catalogMode}
   function update(){
     el('connection-type-pane').hidden=step!==0||advanced;el('connection-platform-pane').hidden=step!==1||advanced;el('connection-model-pane').hidden=step!==2||advanced;el('connection-advanced-pane').hidden=!advanced;
@@ -120,6 +130,8 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
     el('connection-fixed-type-label').textContent=modelTypeLabels[f('kind').value];el('connection-unknown-confirm').hidden=!model||!!kindsOf(model).length;el('connection-confirm-kind').checked=purposeConfirmed;
     el('connection-purpose-note').classList.toggle('purpose-mismatch',!!model&&!allowed(model));el('connection-purpose-note').textContent=!model?'':!allowed(model)?'当前连接与所选类型不匹配，请更改类型或选择正确型号。':unavailable(model)?'此音频子类型暂未适配，不能通过语音合成接口调用。':!kindsOf(model).length?'目录未标注类型，确认厂商文档后方可接入。':f('protocol').value==='custom'?'该型号需要配置专用接口映射。':'已匹配对应接口，模型类型不会被自动改成其他用途。';
     endpoint();platformNote();
+    const p=platform(),kind=f('kind').value,support=el('connection-platform-support');
+    support.innerHTML=p?`<span class="connection-adapter-status ${p.protocols?.[kind]?'ready':'pending'}">${esc(platformSupportLabel(p,kind))}</span><span>${(p.model_types||[]).map(k=>`<span class="connection-output-type ${k===kind?'active':''}">${modelTypeLabels[k]}</span>`).join('')}</span>${p.docs_url?`<a href="${esc(p.docs_url)}" target="_blank" rel="noopener noreferrer">接口文档 ${icon('arrow')}</a>`:''}`:'';
   }
   function drawModels(){
     const kind=f('kind').value,query=el('connection-model-search').value.trim().toLowerCase(),unknown=models.filter(m=>!kindsOf(m).length),matching=models.filter(m=>kindsOf(m).includes(kind));
@@ -145,8 +157,12 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
     ['submit_path','discovery_path','auth_header','auth_prefix','text_path','media_path','base64_path','id_path','status_path','poll_path','response_model_path','response_id_path'].forEach(k=>payload.custom[k]=f(k).value);['success_values','failure_values'].forEach(k=>payload.custom[k]=f(k).value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean));payload.custom.discovery_protocol=f('discovery_protocol').value;payload.custom.capabilities=Object.fromEntries(Object.keys(capabilityNames).map(k=>[k,f('cap_'+k).checked]));
     saving=true;error();update();try{const saved=await api('/api/providers/save',payload);state.providers=state.providers.filter(p=>p.id!==saved.id);state.providers.unshift(saved);state.selected[saved.kind]=saved.id;state.usage=null;if(current()){dialog.close();render();toast(modelTypeLabels[saved.kind]+'模型已接入')}else renderNavigation()}catch(err){if(current())error(err.message)}finally{saving=false;if(current())update()}
   }
-  platformOptions(original?.platform);if(!original)f('base_url').value=platform()?.base_url||'';f('discovery_protocol').value=original?.custom?.discovery_protocol||discoveryProtocol(original?.protocol||platform()?.discovery_protocol);protocols(original?.protocol||platform()?.protocols?.[defaultKind]||'custom');update();drawModels();
-  form.querySelectorAll('[data-model-type]').forEach(b=>b.onclick=()=>{if(b.dataset.modelType===f('kind').value)return;const first=!f('kind').value,previous=f('platform').value;f('kind').value=b.dataset.modelType;platformOptions(first?'openai':previous);if(first||f('platform').value!==previous)resetPlatform();else{protocols(platform()?.protocols?.[f('kind').value]||'custom');invalidate()}update()});
+  platformOptions(original?.platform);if(original&&!platformsForKind(platforms,defaultKind).some(p=>p.id===original.platform))f('platform').value='custom';if(!original)f('base_url').value=platform()?.base_url||'';f('discovery_protocol').value=original?.custom?.discovery_protocol||discoveryProtocol(original?.protocol||platform()?.discovery_protocol);protocols(original?.protocol||platform()?.protocols?.[defaultKind]||'custom');update();drawModels();
+  form.querySelectorAll('[data-model-type]').forEach(b=>b.onclick=()=>{
+    if(busy||saving)return;
+    if(b.dataset.modelType!==f('kind').value){const first=!f('kind').value,previous=f('platform').value;f('kind').value=b.dataset.modelType;platformOptions(first?'openai':previous);if(first||f('platform').value!==previous)resetPlatform();else{protocols(platform()?.protocols?.[f('kind').value]||'custom');invalidate()}}
+    showStep(1);f('platform').focus();
+  });
   form.querySelectorAll('[data-wizard-step]').forEach(b=>b.onclick=()=>showStep(Number(b.dataset.wizardStep)));[el('connection-change-type'),el('connection-change-selected-type')].forEach(b=>b.onclick=()=>showStep(0));
   f('platform').onchange=resetPlatform;f('base_url').oninput=()=>invalidate({clearKey:true});f('api_key').oninput=()=>invalidate();f('allow_local').onchange=()=>invalidate();f('discovery_protocol').onchange=()=>invalidate();['discovery_path','auth_header','auth_prefix'].forEach(k=>f(k).oninput=()=>{revision++;busy=false;loaded=false;models=[];update()});
   f('protocol').onchange=()=>{update();if(f('protocol').value==='custom'){advanced=true;advancedFrom=2;update()}};['submit_path','poll_path','text_path','media_path','base64_path','id_path','status_path','success_values'].forEach(k=>f(k).oninput=()=>{error();update()});el('connection-model-search').oninput=drawModels;el('connection-show-unknown').onchange=drawModels;el('connection-confirm-kind').onchange=e=>{purposeConfirmed=e.target.checked;update()};

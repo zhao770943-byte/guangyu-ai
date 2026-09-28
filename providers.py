@@ -105,9 +105,11 @@ def model_constraints(identity):
 
 def audio_task(identity):
     model=str(identity or '').lower().rsplit('/',1)[-1]
+    if model.startswith(('playai-tts','orpheus-','kokoro-')):return 'speech'
     if re.match(r'^(?:tts-\d|gpt-4o-mini-tts(?:-|$)|speech-\d)',model) or re.search(r'(?:^|[-_])tts(?:[-_]|$)',model):return 'speech'
     if 'whisper' in model or 'transcrib' in model or re.search(r'(?:^|[-_])asr(?:[-_]|$)',model):return 'transcription'
     if 'realtime' in model:return 'realtime'
+    if model.startswith('voxtral-'):return 'conversation'
     if 'music' in model:return 'music'
     if 'audio' in model:return 'conversation'
     return ''

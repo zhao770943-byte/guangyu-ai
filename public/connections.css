@@ -50,3 +50,12 @@
 #provider-dialog.fetching-models .connection-footer-left{display:flex}
 
 .connection-mapping-status,.connection-mapping-guide{padding:12px 14px;background:#fff8ea;border:1px solid #f0dfbc;border-radius:8px;color:#8b672a;font-size:12px;line-height:1.8}.connection-mapping-status{margin-top:16px}.connection-mapping-guide{margin-top:16px}.connection-mapping-guide p{color:inherit;margin:6px 0}.connection-mapping-guide ul{padding-left:20px;margin:8px 0 0}
+.connection-platform-support{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:-6px 0 16px;font-size:12px;color:var(--muted)}
+.connection-platform-support a{margin-left:auto;display:inline-flex;align-items:center;gap:4px;color:var(--accent);text-decoration:none}
+.connection-platform-support a:hover{text-decoration:underline}
+.connection-platform-support svg{width:13px;height:13px}
+.connection-adapter-status{padding:4px 8px;border-radius:6px;background:#f3f4f8;color:#68718b}
+.connection-adapter-status.ready{background:#edf7f2;color:#317454}
+.connection-adapter-status.pending{background:#fff6e8;color:#97651f}
+.connection-output-type{display:inline-block;padding:3px 6px;color:#8790a8}
+.connection-output-type.active{color:var(--accent);font-weight:600}

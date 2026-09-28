@@ -135,8 +135,12 @@ def _request(provider, path, key, timeout):
             detail='返回了 HTML 网页，可能是网站首页、登录页或防护页面。' if html else ('响应内容为空。' if not raw.strip() else '返回内容不是有效的 JSON。')
             hint='OpenAI 兼容目录通常为基础地址 + /models；基础地址已含 /v1 时，列表路径不要再填写 /v1/models。请核对“连接选项”中的目录协议和路径。'
             raise providers.ProviderError(f'模型列表接口未返回 JSON（HTTP {status}，GET {request_path}）：{detail}{hint}') from None
+        # Together and some compatible catalogs return a top-level array.
+        # Keep the same size, pagination, entry validation and redaction limits.
+        if isinstance(value, list):
+            value = {'data': value}
         if not isinstance(value, dict):
-            raise providers.ProviderError('模型列表响应应为 JSON 对象。')
+            raise providers.ProviderError('模型列表响应应为 JSON 对象或模型数组。')
         if value.get('error'):
             raise providers.ProviderError('模型列表请求失败：' + _redact(json.dumps(value['error'], ensure_ascii=False), key))
         return value, len(raw)
@@ -188,7 +192,7 @@ def _suggestions(identity, item, family, provider):
     if any(part in leaf for part in ('embedding', 'embed-', 'rerank', 'whisper', 'audio', 'realtime', 'transcrib', 'tts', 'moderation')):
         return [], None
     if providers.model_constraints(identity)['kinds']==['chat'] or leaf.startswith(('gpt-', 'chatgpt-', 'claude-', 'deepseek-', 'qwen', 'moonshot-', 'kimi-', 'grok-',
-                        'glm-', 'minimax-', 'llama-', 'mistral-', 'gemini-')) or re.match(r'^o[1-9](?:-|$)', leaf):
+                        'glm-', 'minimax-', 'llama-', 'mistral-', 'open-mistral-', 'mixtral-', 'open-mixtral-', 'pixtral-', 'ministral-', 'magistral-', 'codestral-', 'devstral-', 'gemma-', 'nemotron-', 'gemini-')) or re.match(r'^o[1-9](?:-|$)', leaf):
         protocol = 'openai_responses' if provider['protocol'] == 'openai_responses' or 'codex' in leaf else 'openai_chat'
         return ['chat'], protocol
     return [], None
@@ -215,6 +219,16 @@ def _normalize(values, family, provider, key):
         # Classification is separate from an installed generation adapter.
         constraints=providers.model_constraints(identity)
         classified=constraints['kinds'] or kinds
+        # Catalog task metadata is stronger than name guessing. Never infer
+        # image generation merely from vision/image *input* capabilities.
+        catalog_task=item.get('type') if isinstance(item.get('type'),str) else ''
+        task_kind={'chat':'chat','language':'chat','text-to-image':'image','image':'image',
+                   'text-to-video':'video','video':'video','text-to-speech':'audio',
+                   'audio':'audio','speech-to-text':'audio','transcription':'audio'}.get(catalog_task)
+        if task_kind:
+            classified=[task_kind]
+            protocol=selected.get('protocols',{}).get(task_kind) if selected else ('openai_chat' if task_kind=='chat' else None)
+            kinds=[task_kind] if protocol else []
         leaf=identity.lower().rsplit('/',1)[-1]
         if not classified:
             if any(x in leaf for x in ('video','hailuo','veo','wan2','wan-','seedance','kling')):classified=['video']
@@ -236,7 +250,7 @@ def _normalize(values, family, provider, key):
         label = label if isinstance(label, str) and label.strip() else identity
         entry = {'id': identity, 'name': _redact(label, key, 240), 'supported_kinds': kinds,
                  'protocol': protocol, 'base_url': provider['base_url'],
-                 'model_constraints': constraints, 'model_kinds':classified,'audio_task':providers.audio_task(identity)}
+                 'model_constraints': constraints, 'model_kinds':classified,'audio_task':{'text-to-speech':'speech','speech-to-text':'transcription','transcription':'transcription'}.get(catalog_task,providers.audio_task(identity))}
         if protocol=='weijin_video':entry['video_model_metadata']=weijin_video.metadata(item) or weijin_video.profile({'model':identity})
         if isinstance(item.get('description'), str):
             entry['description'] = _redact(item['description'], key, 600)
