@@ -172,7 +172,7 @@ def _suggestions(identity, item, family, provider):
         return [], None
     if any(part in leaf for part in ('embedding', 'embed-', 'rerank', 'whisper', 'audio', 'realtime', 'transcrib', 'tts', 'moderation')):
         return [], None
-    if leaf.startswith(('gpt-', 'chatgpt-', 'claude-', 'deepseek-', 'qwen', 'moonshot-', 'kimi-', 'grok-',
+    if providers.model_constraints(identity)['kinds']==['chat'] or leaf.startswith(('gpt-', 'chatgpt-', 'claude-', 'deepseek-', 'qwen', 'moonshot-', 'kimi-', 'grok-',
                         'glm-', 'minimax-', 'llama-', 'mistral-', 'gemini-')) or re.match(r'^o[1-9](?:-|$)', leaf):
         protocol = 'openai_responses' if provider['protocol'] == 'openai_responses' or 'codex' in leaf else 'openai_chat'
         return ['chat'], protocol
@@ -206,7 +206,8 @@ def _normalize(values, family, provider, key):
         label = item.get('display_name', item.get('displayName', item.get('name', identity)))
         label = label if isinstance(label, str) and label.strip() else identity
         entry = {'id': identity, 'name': _redact(label, key, 240), 'supported_kinds': kinds,
-                 'protocol': protocol, 'base_url': provider['base_url']}
+                 'protocol': protocol, 'base_url': provider['base_url'],
+                 'model_constraints': providers.model_constraints(identity)}
         if isinstance(item.get('description'), str):
             entry['description'] = _redact(item['description'], key, 600)
         normalized.append(entry)

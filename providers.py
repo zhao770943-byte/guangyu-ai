@@ -75,11 +75,50 @@ def validate_custom_auth(custom):
         raise ValueError('认证前缀无效或包含控制字符。')
     return header,prefix
 
+def model_constraints(identity):
+    """Known output kinds only; unknown IDs remain open to custom adapters.
+
+    Vision inputs do not make a text model an image/video output model. Keep
+    these rules narrower than catalog suggestions and independent of settings.
+    """
+    kinds=[]
+    if isinstance(identity,str):
+        model=identity.strip().lower().removeprefix('models/').rsplit('/',1)[-1]
+        if re.match(r'^(?:gpt-image-|chatgpt-image-|dall-e-)\d',model) or model in ('image-01','image-01-live'):
+            kinds=['image']
+        elif re.match(r'^sora-\d',model):
+            kinds=['video']
+        elif re.match(r'^gemini-\d[\w.-]*image(?:[.-]|$)',model):
+            kinds=['image','chat']
+        elif not any(part in model for part in ('image','video','imagine','flux','sdxl','stable-diffusion','cogvideo','embedding','embed-','rerank','whisper','audio','realtime','transcrib','tts','moderation')):
+            if (re.match(r'^minimax-m\d+(?:[._-]|$)',model)
+                    or re.match(r'^(?:gpt-(?:4o|[345])(?:[.-]|$)|chatgpt-(?:4o|latest)(?:[.-]|$)|o[1-9](?:[.-]|$))',model)
+                    or re.match(r'^claude-(?:[234](?:[.-]|$)|(?:opus|sonnet|haiku)-\d)',model)
+                    or re.match(r'^deepseek-(?:chat|reasoner|[vr]\d)(?:[._-]|$)',model)):
+                kinds=['chat']
+    reason={'chat':'该模型输出文本，图片或视频输入能力不代表可以生成图像或视频。',
+            'image':'该模型用于生成图像。','video':'该模型用于生成视频。'}.get(kinds[0],'') if len(kinds)==1 else ('该模型可用于图像生成和文本对话。' if kinds else '')
+    return {'kinds':kinds,'reason':reason}
+
+def validate_model_kind(provider):
+    constraints=model_constraints(provider.get('model'))
+    if constraints['kinds'] and provider.get('kind') not in constraints['kinds']:
+        labels={'chat':'AI 助手（文本输出）','image':'图像','video':'视频'}
+        expected=' / '.join(labels[kind] for kind in constraints['kinds'])
+        actual=labels.get(provider.get('kind'),str(provider.get('kind')))
+        raise ValueError(f"模型 {provider.get('model')} 支持的用途是 {expected}，不能用于{actual}。请编辑模型连接并修正用途。")
+    if provider.get('kind')=='image' and provider.get('protocol')=='openai_image':
+        hostname=urllib.parse.urlsplit(provider.get('base_url','')).hostname
+        if hostname in ('api.minimax.cn','api.minimax.io'):
+            raise ValueError('MiniMax 官方图像接口使用 /image_generation，不支持 OpenAI Images 的 /images/generations。请使用自定义 JSON 映射配置该平台的图像接口。')
+    return constraints
+
 def validate(p):
     if p.get('kind') not in PROTOCOLS or p.get('protocol') not in PROTOCOLS[p['kind']]: raise ValueError('用途与协议不匹配。')
     for field,maximum in [('name',60),('model',200),('base_url',2000)]:
         if not isinstance(p.get(field),str) or not p[field].strip() or len(p[field])>maximum: raise ValueError(f'{field} 不能为空或过长。')
         p[field]=p[field].strip()
+    validate_model_kind(p)
     url=urllib.parse.urlsplit(p['base_url'])
     if not url.hostname or url.username or url.password or url.query or url.fragment: raise ValueError('基础地址需为完整 URL，不包含密钥、用户名、查询参数或片段。')
     try: _=url.port
@@ -159,9 +198,11 @@ def request(p,path,payload=None,multipart=False):
         raw=ex.read(8000).decode('utf-8',errors='replace')
         obj=None
         try:
-            obj=json.loads(raw);error=obj.get('error',obj.get('message',obj));detail=str(error.get('message',error) if isinstance(error,dict) else error)
+            obj=json.loads(raw);error=obj.get('error',obj.get('message',obj)) if isinstance(obj,dict) else obj;detail=str(error.get('message',error) if isinstance(error,dict) else error)
         except ValueError: detail='接口返回非 JSON 错误，请检查平台服务。'
-        raise ProviderError(f'平台返回 HTTP {ex.code}：{clean_error(detail,p)}',retryable=payload is None and ex.code in (408,429,500,502,503,504),response=obj if isinstance(obj,dict) else None) from None
+        safe_path=clean_error(urllib.parse.unquote(urllib.parse.urlsplit(path).path),p)
+        guidance=' 请核对模型用途、接口协议和请求路径。' if ex.code in (404,405) else ''
+        raise ProviderError(f'平台返回 HTTP {ex.code}（{req.get_method()} {safe_path}）：{clean_error(detail,p)}{guidance}',retryable=payload is None and ex.code in (408,429,500,502,503,504),response=obj if isinstance(obj,dict) else None) from None
     except (urllib.error.URLError,TimeoutError,socket.timeout,ConnectionError,OSError):
         raise ProviderError('网络连接失败或超时。平台可能已接受请求，请先在平台核对任务和用量，再决定是否重新提交。',uncertain=payload is not None,retryable=payload is None) from None
 def dig(obj,path):
@@ -203,6 +244,7 @@ def template_context(p,job):
     return context
 
 def build(p,job):
+    validate_model_kind(p)
     protocol,kind=p['protocol'],p['kind'];prompt,model=job['prompt'],p['model']
     messages=job.get('messages',[{'role':'user','content':prompt}]);multipart=False
     inputs,params,_=capabilities.validate_job(p,job.get('input_assets'),job.get('parameters'),job.get('size','auto'))

@@ -81,6 +81,16 @@ class Fixture(BaseHTTPRequestHandler):
                                       {'id': KEY}]})
         if parsed.path == '/error/models':
             return self.send({'error': {'message': 'denied ' + KEY}}, 401)
+        if parsed.path == '/html404/models':
+            raw = ('<html>Not Found ' + KEY + '</html>').encode()
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        if parsed.path == '/arrayerror/models':
+            return self.send(['upstream unavailable'], 502)
         if parsed.path == '/redirect/models':
             return self.send({}, 302, {'Location': f'http://127.0.0.1:{self.server.server_port}/redirect-target'})
         if parsed.path == '/custom/catalog':
@@ -99,6 +109,9 @@ class Fixture(BaseHTTPRequestHandler):
             return self.send({'data': [{'id': 'gpt-dual-fixture'}]})
         if parsed.path == '/single/models':
             return self.send({'data': [{'id': 'gpt-single'}]})
+        if parsed.path == '/minimax/models':
+            return self.send({'data': [{'id': 'MiniMax-M3'}, {'id': 'MiniMax-M2.5'},
+                                      {'id': 'image-01'}, {'id': 'vendor-private-model'}]})
         return self.send({'error': {'message': 'not found'}}, 404)
 
     def do_POST(self):
@@ -188,6 +201,100 @@ class DiscoveryTests(unittest.TestCase):
         for identity in ('text-embedding-fixture', 'qwen-image', 'glm-image', 'grok-imagine-video', 'unrecognized-id'):
             self.assertEqual(entries[identity]['supported_kinds'], [])
             self.assertIsNone(entries[identity]['protocol'])
+
+    def test_known_model_constraints_do_not_follow_selected_purpose(self):
+        for kind, protocol in (('image', 'openai_image'), ('video', 'openai_video'), ('chat', 'openai_chat')):
+            entries = {item['id']: item for item in self.discover('/minimax', protocol, kind=kind, platform='minimax')['models']}
+            self.assertEqual(entries['MiniMax-M3']['supported_kinds'], ['chat'])
+            self.assertEqual(entries['MiniMax-M3']['protocol'], 'openai_chat')
+            self.assertEqual(entries['MiniMax-M3']['model_constraints']['kinds'], ['chat'])
+            self.assertEqual(entries['image-01']['model_constraints']['kinds'], ['image'])
+            self.assertEqual(entries['vendor-private-model']['model_constraints']['kinds'], [])
+        self.assertTrue(all(call['method'] == 'GET' for call in CALLS))
+        for identity, kinds in (('gpt-image-1', ['image']), ('sora-2', ['video']), ('gpt-4o', ['chat']),
+                                ('gemini-3-pro-image-preview', ['image', 'chat'])):
+            self.assertEqual(providers.model_constraints(identity)['kinds'], kinds)
+        for identity in ('minimax-image-next', 'qwen-image', 'gpt-private-renderer', 'gemini-fixture'):
+            self.assertEqual(providers.model_constraints(identity)['kinds'], [])
+
+    def test_save_rejects_known_model_wrong_output_kind_including_custom(self):
+        for identity, kind, protocol in (('MiniMax-M3', 'image', 'openai_image'),
+                                          ('MiniMax-M3', 'video', 'openai_video'),
+                                          ('gpt-image-1', 'chat', 'openai_chat'),
+                                          ('sora-2', 'image', 'openai_image'),
+                                          ('MiniMax-M3', 'image', 'custom')):
+            custom = {'submit_path': '/generate', 'body': {'model': '{{model}}', 'prompt': '{{prompt}}'},
+                      'media_path': 'data.url'}
+            error = self.api('/api/providers/save', {**self.config('/minimax', protocol), 'name': 'Wrong model purpose',
+                            'model': identity, 'kind': kind, 'custom': custom,
+                            'model_constraints': {'kinds': [kind]}}, 400)
+            self.assertIn(identity, error['error'])
+            self.assertIn('修正用途', error['error'])
+        self.assertFalse(storage.items('providers'))
+        self.assertFalse(CALLS)
+
+    def test_legacy_wrong_connection_is_visible_but_blocked_before_job_or_http(self):
+        saved = self.save('/minimax', platform='minimax', model='MiniMax-M3')
+        legacy = storage.get('providers', saved['id'])
+        legacy.update(kind='image', protocol='openai_image')
+        storage.put('providers', legacy)
+        public = self.api('/api/bootstrap')['providers'][0]
+        self.assertEqual(public['kind'], 'image')
+        self.assertEqual(public['model_constraints']['kinds'], ['chat'])
+        with patch.object(server, 'dispatch') as dispatch:
+            error = self.api('/api/jobs', {'provider_id': saved['id'], 'prompt': 'Do not submit this request'}, 400)
+            dispatch.assert_not_called()
+        self.assertIn('MiniMax-M3', error['error'])
+        self.assertFalse(storage.items('jobs'))
+        self.assertFalse(storage.items('conversations'))
+        self.assertFalse(CALLS)
+        fixed = self.save('/minimax', id=saved['id'], platform='minimax', model='MiniMax-M3', api_key='')
+        self.assertEqual(fixed['kind'], 'chat')
+        self.assertEqual(fixed['model_constraints']['kinds'], ['chat'])
+
+    def test_unknown_models_preserve_custom_media_adapter_space(self):
+        custom = {'submit_path': '/generate', 'body': {'model': '{{model}}', 'prompt': '{{prompt}}'},
+                  'media_path': 'data.url'}
+        for kind in ('image', 'video'):
+            saved = self.save(protocol='custom', kind=kind, model='private-output-workflow', custom=custom)
+            self.assertEqual(saved['model_constraints']['kinds'], [])
+            provider = storage.get('providers', saved['id'])
+            path, body, _ = providers.build(provider, {'prompt': 'fixture prompt', 'size': 'auto', 'seconds': 4})
+            self.assertEqual(path, '/generate')
+            self.assertEqual(body['model'], 'private-output-workflow')
+        self.assertFalse(CALLS)
+
+    def test_official_minimax_image_endpoint_requires_custom_mapping_but_proxy_is_allowed(self):
+        for hostname in ('api.minimax.cn', 'api.minimax.io'):
+            error = self.api('/api/providers/save', {**self.config(protocol='openai_image'),
+                             'name': 'Wrong MiniMax adapter', 'kind': 'image', 'model': 'image-01',
+                             'base_url': 'https://' + hostname + '/v1'}, 400)
+            self.assertIn('/image_generation', error['error'])
+            self.assertIn('自定义 JSON', error['error'])
+        proxy = self.save(protocol='openai_image', kind='image', model='image-01',
+                          base_url='https://minimax.proxy.example/v1')
+        self.assertEqual(proxy['protocol'], 'openai_image')
+        custom = {'submit_path': '/image_generation', 'body': {'model': '{{model}}', 'prompt': '{{prompt}}'},
+                  'media_path': 'data.image_urls'}
+        native = self.save(protocol='custom', kind='image', model='image-01', custom=custom,
+                           base_url='https://api.minimax.cn/v1')
+        self.assertEqual(native['protocol'], 'custom')
+        self.assertFalse(CALLS)
+
+    def test_request_errors_include_relative_path_without_query_or_secret(self):
+        for prefix, status in (('/html404', 404), ('/arrayerror', 502)):
+            saved = self.save(prefix)
+            provider = storage.get('providers', saved['id'])
+            with self.assertRaises(providers.ProviderError) as failure:
+                providers.request(provider, '/models?diagnostic=private-query-value')
+            message = str(failure.exception)
+            self.assertIn('HTTP ' + str(status), message)
+            self.assertIn('GET /models', message)
+            self.assertNotIn('private-query-value', message)
+            self.assertNotIn(KEY, message)
+            self.assertNotIn(self.upstream, message)
+            if status == 404:
+                self.assertIn('模型用途', message)
 
     def test_anthropic_auth_and_pagination_use_native_contract(self):
         value = self.discover('/anthropic/v1', 'anthropic')

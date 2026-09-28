@@ -9,7 +9,7 @@ function renderSettings(){
   const draw=()=>{
     const q=connectionView.query.trim().toLowerCase();
     const rows=state.providers.filter(p=>(connectionView.filter==='all'||p.kind===connectionView.filter)&&[p.name,p.model,p.base_url].join(' ').toLowerCase().includes(q));
-    $('#connection-rows').innerHTML=rows.length?`<div class="connection-table-head"><span>模型 / 名称</span><span>接入地址</span><span>用途</span><span>管理</span></div>`+rows.map(p=>`<article class="connection-row"><div class="connection-identity"><div class="connection-kind-icon ${esc(p.kind)}">${icon(p.kind==='chat'?'assistant':p.kind)}</div><div><h3>${esc(p.name)}</h3><p>${esc(p.model)}</p></div></div><div class="connection-address"><span>${esc(p.base_url)}</span><small>${esc(protocolNames[p.protocol])} · ${p.has_key?'密钥已加密':'无密钥'}</small></div><div><span class="connection-kind-label ${esc(p.kind)}">${p.kind==='chat'?'AI 助手':kindNames[p.kind]}</span></div><div class="connection-row-actions"><button class="button secondary compact" data-discover-provider="${p.id}" aria-label="获取 ${esc(p.name)} 的可用模型">${icon('refresh')} 获取模型</button><button class="button secondary compact" data-edit="${p.id}" aria-label="编辑 ${esc(p.name)}">编辑</button><button class="icon-button" data-delete="${p.id}" title="移除连接" aria-label="删除 ${esc(p.name)}">${icon('trash')}</button></div></article>`).join(''):`<div class="connections-empty"><div class="connections-empty-symbol">${icon('model')}</div><h2>${state.providers.length?'没有匹配的模型':'接入第一个模型'}</h2><p>${state.providers.length?'试试其他关键词，或切换上方用途。':'选择平台，读取模型列表，即可开始创作。'}</p>${state.providers.length?'':`<button class="button primary" data-action="add-provider">${icon('plus')} 接入模型</button><div class="connection-supported">OpenAI · Claude · Gemini · DeepSeek · 更多兼容平台</div>`}</div>`;
+    $('#connection-rows').innerHTML=rows.length?`<div class="connection-table-head"><span>模型 / 名称</span><span>接入地址</span><span>用途</span><span>管理</span></div>`+rows.map(p=>`<article class="connection-row"><div class="connection-identity"><div class="connection-kind-icon ${esc(p.kind)}">${icon(p.kind==='chat'?'assistant':p.kind)}</div><div><h3>${esc(p.name)}</h3><p>${esc(p.model)}</p></div></div><div class="connection-address"><span>${esc(p.base_url)}</span><small>${esc(protocolNames[p.protocol])} · ${p.has_key?'密钥已加密':'无密钥'}</small></div><div><span class="connection-kind-label ${providerUsable(p)?esc(p.kind):'invalid'}">${providerUsable(p)?(p.kind==='chat'?'AI 助手':kindNames[p.kind]):'用途需修正'}</span></div><div class="connection-row-actions"><button class="button secondary compact" data-discover-provider="${p.id}" aria-label="获取 ${esc(p.name)} 的可用模型">${icon('refresh')} 获取模型</button><button class="button secondary compact" data-edit="${p.id}" aria-label="编辑 ${esc(p.name)}">编辑</button><button class="icon-button" data-delete="${p.id}" title="移除连接" aria-label="删除 ${esc(p.name)}">${icon('trash')}</button></div></article>`).join(''):`<div class="connections-empty"><div class="connections-empty-symbol">${icon('model')}</div><h2>${state.providers.length?'没有匹配的模型':'接入第一个模型'}</h2><p>${state.providers.length?'试试其他关键词，或切换上方用途。':'选择平台，读取模型列表，即可开始创作。'}</p>${state.providers.length?'':`<button class="button primary" data-action="add-provider">${icon('plus')} 接入模型</button><div class="connection-supported">OpenAI · Claude · Gemini · DeepSeek · 更多兼容平台</div>`}</div>`;
   };
   $('.connection-search input').oninput=e=>{connectionView.query=e.target.value;draw()};
   document.querySelectorAll('[data-connection-filter]').forEach(button=>button.onclick=()=>{connectionView.filter=button.dataset.connectionFilter;renderSettings()});draw();
@@ -66,8 +66,11 @@ async function editProvider(id,kind,{autoDiscover=false}={}){
 function setupConnectionWizard(form,original,platforms,defaultKind){
   const dialog=$('#provider-dialog'), f=name=>form.elements.namedItem(name), el=id=>form.querySelector('#'+id);
   const current=()=>form.isConnected&&dialog.open&&$('#provider-form')===form;
-  let step=original?2:1, advanced=false, advancedFrom=1, revision=0, busy=false, saving=false, models=[], loaded=false, model=original?{id:original.model,name:original.model,supported_kinds:[original.kind],protocol:original.protocol}:null, purposeConfirmed=!!original, automaticName='';
+  let step=original?2:1, advanced=false, advancedFrom=1, revision=0, busy=false, saving=false, models=[], loaded=false, model=original?{id:original.model,name:original.model,supported_kinds:original.model_constraints?.kinds?.length?original.model_constraints.kinds:[original.kind],model_constraints:original.model_constraints,protocol:original.protocol}:null, purposeConfirmed=!!original, automaticName='';
   const platform=()=>platforms.find(p=>p.id===f('platform').value);
+  const knownKinds=()=>(model?.model_constraints?.kinds||[]).filter(k=>protocolOptions[k]);
+  const purposeAllowed=kind=>!knownKinds().length||knownKinds().includes(kind);
+  const purposeLabel=kind=>kind==='chat'?'AI 助手':kindNames[kind];
   const canonical=value=>value.trim().replace(/\/+$/,'');
   const savedAddress=()=>original&&canonical(original.base_url)===canonical(f('base_url').value);
   function error(message=''){el('connection-error').hidden=!message;el('connection-error').textContent=message}
@@ -88,15 +91,17 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
     dialog.classList.toggle('choosing-model',step===2&&!advanced);dialog.classList.toggle('editing-mapping',advanced);dialog.classList.toggle('fetching-models',step===1&&!advanced);
     el('connection-step-one').setAttribute('aria-current',step===1?'step':'false');el('connection-step-one').disabled=saving;el('connection-step-two').setAttribute('aria-current',step===2?'step':'false');el('connection-step-two').disabled=!(loaded||model)||busy||saving;
     form.querySelectorAll('input,select,textarea').forEach(control=>control.disabled=saving);
-    el('connection-primary').disabled=busy||saving||(!advanced&&step===2&&(!model?.id||!purposeConfirmed));
+    el('connection-primary').disabled=busy||saving||(!advanced&&step===2&&(!model?.id||!purposeConfirmed||!purposeAllowed(f('kind').value)));
     el('connection-primary').innerHTML=saving?'<span class="spinner"></span> 保存中':busy?'<span class="spinner"></span> 正在获取模型…':advanced?'完成配置':step===1?icon('refresh')+' 一键获取模型':(original?'保存修改':'接入所选模型');
     el('connection-back').hidden=step===1&&!advanced;el('connection-back').textContent=advanced?'返回':'上一步';el('connection-back').disabled=saving;
-    el('connection-footer-hint').textContent=advanced?'仅在需要时修改':step===2?(model?.id?(purposeConfirmed?'已选择 1 个模型':'请确认模型用途'):'请选择一个模型'):'自动读取模型，无需手动输入 ID';
+    el('connection-footer-hint').textContent=advanced?'仅在需要时修改':step===2?(model?.id?(!purposeAllowed(f('kind').value)?'请修正模型用途':purposeConfirmed?'已选择 1 个模型':'请确认模型用途'):'请选择一个模型'):'自动读取模型，无需手动输入 ID';
     el('connection-refresh').disabled=busy||saving;el('connection-refresh').innerHTML=busy?'<span class="spinner"></span> 获取中':icon('refresh')+' 一键获取模型';
     el('connection-selected-fields').hidden=!model?.id;
     el('connection-selected-summary').innerHTML=model?.id?`<div class="connection-selected-icon">${icon(purposeConfirmed?(f('kind').value==='chat'?'assistant':f('kind').value):'model')}</div><h3>${esc(model.id)}</h3><p>${esc(platform()?.name||'自定义平台')}</p>`:`<div class="connection-selection-empty">${icon('model')}<h3>还未选择模型</h3><p>从左侧选择一个模型，<br>这里会显示连接信息。</p></div>`;
-    f('purpose').forEach(radio=>radio.checked=!!model?.id&&purposeConfirmed&&radio.value===f('kind').value);
-    el('connection-purpose-note').textContent=!model?.id?'':purposeConfirmed?'可根据实际接口能力调整用途。':'无法自动识别用途，请选择实际用途后保存。';
+    f('purpose').forEach(radio=>{radio.checked=!!model?.id&&purposeConfirmed&&radio.value===f('kind').value;radio.disabled=saving||!purposeAllowed(radio.value)});
+    const mismatch=!!model?.id&&!purposeAllowed(f('kind').value);
+    el('connection-purpose-note').classList.toggle('purpose-mismatch',mismatch);
+    el('connection-purpose-note').textContent=!model?.id?'':knownKinds().length?`此模型用于${knownKinds().map(purposeLabel).join('、')}。${mismatch?'当前用途不匹配，请选择正确用途后保存。':f('protocol').value==='custom'?'需要在高级参数中配置平台专用接口映射。':'不支持的用途已禁用。'}`:purposeConfirmed?'用途尚未核实，请按平台文档确认模型的输出能力。':'无法自动识别用途，请选择实际用途后保存。';
     el('connection-result-count').textContent=loaded?`${models.length} 个模型`:(original?'当前连接':'等待获取');
     endpoint();
   }
@@ -108,8 +113,8 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   }
   function selectModel(value){
     model=value?.id?value:null;f('model').value=model?.id||'';
-    const kinds=(model?.supported_kinds||[]).filter(k=>protocolOptions[k]);
-    if(kinds.length){purposeConfirmed=true;if(!kinds.includes(f('kind').value))f('kind').value=kinds[0];protocols(model.protocol||platform()?.protocols?.[f('kind').value])}
+    const kinds=knownKinds().length?knownKinds():(model?.supported_kinds||[]).filter(k=>protocolOptions[k]);
+    if(kinds.length){purposeConfirmed=true;if(!kinds.includes(f('kind').value))f('kind').value=kinds[0];protocols(model.protocol||platform()?.protocols?.[f('kind').value]||'custom')}
     else purposeConfirmed=false;
     if(model&&(!f('name').value||f('name').value===automaticName)){automaticName=(model.name||model.id).slice(0,60);f('name').value=automaticName}
     update();drawModels();
@@ -140,6 +145,7 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   }
   async function save(){
     if(saving||busy||!model?.id||!purposeConfirmed||!validConnection())return;
+    if(!purposeAllowed(f('kind').value)){showStep(2);error('所选用途与模型不匹配，请根据模型输出能力修正用途。');return}
     const name=f('name').value.trim();if(!name){error('请填写连接名称。');f('name').focus();return}
     if(name.length>60){error('连接名称最多 60 个字符。');f('name').focus();return}
     const payload={};['id','platform','kind','protocol','base_url','api_key'].forEach(key=>payload[key]=f(key).value);payload.name=name;payload.model=model.id;payload.allow_local=f('allow_local').checked;
@@ -158,7 +164,7 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   f('platform').onchange=()=>{f('base_url').value=platform()?.base_url||'';f('allow_local').checked=!!platform()?.allow_local;f('discovery_path').value='';f('auth_header').value='Authorization';f('auth_prefix').value='Bearer ';f('kind').value=platform()?.protocols?.[defaultKind]?defaultKind:Object.keys(platform()?.protocols||{chat:''})[0];f('discovery_protocol').value=discoveryProtocol(platform()?.protocols?.[f('kind').value]);protocols(platform()?.protocols?.[f('kind').value]);invalidate({clearKey:true})};
   f('base_url').oninput=()=>invalidate({clearKey:true});f('api_key').oninput=()=>invalidate();f('allow_local').onchange=()=>invalidate();f('discovery_protocol').onchange=()=>{invalidate();if(f('discovery_protocol').value==='custom'){f('protocol').value='custom';advanced=true;advancedFrom=1;update()}};
   ['discovery_path','auth_header','auth_prefix'].forEach(key=>f(key).oninput=()=>{revision++;loaded=false;models=[];busy=false;platformNote();update()});
-  f('purpose').forEach(radio=>radio.onchange=()=>{const custom=f('protocol').value==='custom';f('kind').value=radio.value;purposeConfirmed=true;protocols(custom?'custom':platform()?.protocols?.[radio.value]||model?.protocol);update()});f('protocol').onchange=()=>{endpoint();if(f('protocol').value==='custom'){advanced=true;advancedFrom=2;update()}};f('submit_path').oninput=endpoint;
+  f('purpose').forEach(radio=>radio.onchange=()=>{if(!purposeAllowed(radio.value)){update();return}const custom=f('protocol').value==='custom';f('kind').value=radio.value;purposeConfirmed=true;protocols(custom?'custom':platform()?.protocols?.[radio.value]||model?.protocol);update()});f('protocol').onchange=()=>{endpoint();if(f('protocol').value==='custom'){advanced=true;advancedFrom=2;update()}};f('submit_path').oninput=endpoint;
   el('connection-model-search').oninput=drawModels;
   el('connection-key-toggle').onclick=()=>{const visible=f('api_key').type==='password';f('api_key').type=visible?'text':'password';el('connection-key-toggle').textContent=visible?'隐藏':'显示';el('connection-key-toggle').setAttribute('aria-label',visible?'隐藏密钥':'显示密钥')};
   el('connection-step-one').onclick=()=>showStep(1);el('connection-step-two').onclick=()=>showStep(2);el('connection-back').onclick=()=>{if(advanced){advanced=false;step=advancedFrom;update()}else showStep(1)};

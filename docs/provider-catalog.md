@@ -39,6 +39,7 @@
 | DeepSeek | `https://api.deepseek.com` | `/models` | Bearer；返回模型 ID 与元数据 | [接入](https://api-docs.deepseek.com/guides/harness)、[模型列表](https://api-docs.deepseek.com/api/list-models/) |
 | SiliconFlow 硅基流动 | `https://api.siliconflow.cn/v1` | `/models` | Bearer；可按 `type` 和 `sub_type` 筛选 | [获取用户模型列表](https://api-docs.siliconflow.cn/docs/api/models-get) |
 | Moonshot / Kimi | `https://api.moonshot.cn/v1` | `/models` | Bearer；返回 `data` | [列出模型](https://platform.kimi.com/docs/api/list-models)、[API 概述](https://platform.kimi.com/docs/api/overview) |
+| MiniMax（中国区） | `https://api.minimax.cn/v1` | `/models` | Bearer；返回 `data`，公开模型结构为 `id`、`object`、`created`、`owned_by`，未声明输出模态字段 | [模型列表](https://platform.minimax.cn/docs/api-reference/models/openai/list-models)、[模型详情](https://platform.minimax.cn/docs/api-reference/models/openai/retrieve-model) |
 | OpenRouter | `https://openrouter.ai/api/v1` | `/models` | Bearer；目录包含输入／输出模态等属性，不等于账号调用授权 | [模型目录](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) |
 | xAI | `https://api.x.ai/v1` | `/models` | Bearer；还有独立语言／图像／视频模型列表端点 | [Models](https://docs.x.ai/developers/rest-api-reference/inference/models)、[接入](https://docs.x.ai/developers/quickstart) |
 | Ollama 本机 | `http://127.0.0.1:11434/v1` | `/models` | 本机默认忽略 API Key；需先运行 Ollama 并准备模型 | [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility) |
@@ -54,12 +55,13 @@
 | --- | --- | --- |
 | 阿里云百炼 / Qwen（中国北京，按量） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 官方说明此 OpenAI 兼容入口不提供 `GET /models`；本应用仍对实际填写的地址发起目录请求。[列表限制](https://help.aliyun.com/en/model-studio/deepseek-harness) |
 | 智谱 | `https://open.bigmodel.cn/api/paas/v4` | 已确认聊天入口与 Bearer 鉴权，尚无经核对的通用目录支持承诺；按当前地址实际尝试。[快速开始](https://docs.bigmodel.cn/cn/guide/start/quick-start) |
-| MiniMax（中国区） | `https://api.minimax.cn/v1` | 官方 OpenAI 兼容页提供此地址；模型目录以实际请求结果为准。[OpenAI SDK](https://platform.minimax.cn/docs/api-reference/text-openai-api) |
 | 火山方舟 | `https://ark.cn-beijing.volces.com/api/v3` | 聊天使用兼容入口；官方基础模型列表另属管控面 API，本应用未集成其签名流程。兼容入口的目录按实际响应处理。[兼容说明](https://docs.volcengine.com/docs/ark/compatible-with-openai-sdk?lang=zh)、[管控模型列表](https://api.volcengine.com/api-explorer/?action=ListFoundationModels&serviceCode=ark&version=2024-01-01) |
 
 百炼目前推荐工作空间专属域名，例如 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；传统域名仍可用。地区与计费计划的 Key 和地址不能混用，应按自己的控制台配置。[域名迁移说明](https://help.aliyun.com/en/model-studio/compatibility-with-openai-responses-api)、[计费入口说明](https://help.aliyun.com/en/model-studio/token-plan-team-quickstart)
 
 上述中国区地址不是其他地区或订阅套餐的通用入口。MiniMax 文档当前使用 `api.minimax.cn`；旧品牌域名或代理地址是否可用需独立确认。本应用不会在未告知的情况下跨域更换地址并转发密钥。
+
+MiniMax 的模型列表能确认模型 ID，不能据此推断图像输出能力。官方将 `MiniMax-M3` 列为支持图片／视频输入的 Chat Completions 模型；本应用应将其用于 AI 助手。中国区文生图接口支持 `image-01`、`image-01-live`，使用 `/image_generation`，不是 OpenAI Images 的 `/images/generations`。[M3 输入与聊天接口](https://platform.minimax.cn/docs/api-reference/text-openai-api)、[文生图接口](https://platform.minimax.cn/docs/api-reference/image-generation-t2i)
 
 ## 代理、兼容服务与自定义协议
 

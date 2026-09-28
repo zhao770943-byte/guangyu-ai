@@ -20,8 +20,9 @@ let toastTimer,polling=false,lastResultSignature='',assistantSignature='',usageV
 const uploadLocks=new Set();
 function toast(text){$('#toast').textContent=text;$('#toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),5200)}
 async function api(path,body){const r=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrf},body:JSON.stringify(body)});let data;try{data=await r.json()}catch{throw Error('无法读取本机服务，请确认光屿 AI 正在运行。')}if(!r.ok)throw Error(data.error||`请求失败（${r.status}）`);return data}
-function chosen(kind){return state.providers.find(p=>p.id===state.selected[kind]&&p.kind===kind)||state.providers.find(p=>p.kind===kind)}
-function options(kind){const list=state.providers.filter(p=>p.kind===kind);return list.length?list.map(p=>`<option value="${p.id}" ${chosen(kind)?.id===p.id?'selected':''}>${esc(p.name)} · ${esc(p.model)}</option>`).join(''):`<option value="">选择${kind==='chat'?'语言模型':kindNames[kind]+'模型'} · 请先接入</option>`}
+function providerUsable(p){const kinds=p.model_constraints?.kinds||[];return !kinds.length||kinds.includes(p.kind)}
+function chosen(kind){return state.providers.find(p=>p.id===state.selected[kind]&&p.kind===kind&&providerUsable(p))||state.providers.find(p=>p.kind===kind&&providerUsable(p))}
+function options(kind){const list=state.providers.filter(p=>p.kind===kind&&providerUsable(p));return list.length?list.map(p=>`<option value="${p.id}" ${chosen(kind)?.id===p.id?'selected':''}>${esc(p.name)} · ${esc(p.model)}</option>`).join(''):`<option value="">选择${kind==='chat'?'语言模型':kindNames[kind]+'模型'} · 请先接入</option>`}
 function capabilities(p){return p?.capabilities||{}}
 function capChips(p,limit=5){return Object.entries(capabilities(p)).filter(([,v])=>v).slice(0,limit).map(([k])=>`<span class="cap-chip enabled">${capabilityNames[k]}</span>`).join('')}
 function heading(title,description,actions='',which=state.page){return `<div class="page-heading"><div><div class="heading-title">${icon(which)}<h1>${title}</h1></div><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`}

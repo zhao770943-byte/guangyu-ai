@@ -70,6 +70,16 @@
 
 输入图片支持静态 PNG、JPEG、WebP，每张最多 10 MiB、4000 万像素，最多 8 张参考图。OpenAI 视频首帧须匹配目标尺寸；DALL·E 2 编辑须单张、小于 4 MiB 的正方形 PNG。工作台不会暗中裁剪或拉伸图片。
 
+## MiniMax 模型用途与接口
+
+`MiniMax-M3` 在本应用中应配置为 **AI 助手 → OpenAI Chat Completions**，API 基础地址为 `https://api.minimax.cn/v1`。官方文档描述的图片、视频能力是多模态输入，用于理解内容；聊天结果从 `choices[].message.content` 读取，不应把该模型配置为 OpenAI Images。当前助手界面提供多轮文本输入，供应商支持的其他输入能力需要应用另外适配。[MiniMax OpenAI SDK 文档](https://platform.minimax.cn/docs/api-reference/text-openai-api)
+
+MiniMax 中国区文生图接口列出的模型为 `image-01` 和 `image-01-live`，使用 Bearer 鉴权与 `POST /image_generation` JSON 请求。它的路径和响应结构与 OpenAI Images 不同：图片 URL 位于 `data.image_urls`，Base64 图片位于 `data.image_base64`，还需检查 `base_resp.status_code` 是否为 `0`。接入这类模型需要匹配的专有适配器或自定义 JSON 映射，不能仅更换模型 ID 沿用 OpenAI Images。[MiniMax 文生图接口](https://platform.minimax.cn/docs/api-reference/image-generation-t2i)、[图片生成指南](https://platform.minimax.cn/docs/guides/image-generation)
+
+国际站文生图文档使用 `https://api.minimax.io/v1/image_generation`，目前只列出 `image-01`。应按账号所在站点核对模型与地址，不自动跨站切换密钥。[国际站文生图接口](https://platform.minimax.io/docs/api-reference/image-generation-t2i)
+
+官方 `GET /models` 与 `GET /models/{model_id}` 提供模型身份字段，公开结构未声明输出模态；列表包含 M3 并不意味着它可以生图。实际可选条目仍以自己的目录返回结果为准。[模型列表](https://platform.minimax.cn/docs/api-reference/models/openai/list-models)、[模型详情](https://platform.minimax.cn/docs/api-reference/models/openai/retrieve-model)
+
 ## 自定义 JSON
 
 “高级参数与映射”中的“模型列表路径”（`discovery_path`）可指定自定义模型列表相对路径，例如 `/models` 或 `/catalog/models`，未填写时尝试 `/models`。第一步也可以从“连接选项 → 自定义认证与列表路径”打开配置。地址相对于当前 API 基础地址拼接，不接受查询字符串；它必须返回 JSON 对象中的 `data`、`models` 或 `items` 数组，模型项使用 `id` 或 `name` 字段。不能填写跨域绝对 URL，也不会跨域跟随重定向。没有符合结构的列表接口时会提示错误，需调整目录配置后重新获取。
