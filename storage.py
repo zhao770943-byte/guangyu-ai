@@ -68,7 +68,8 @@ def public_provider(p):
     return {**{k:v for k,v in p.items() if k!='secret'},'has_key':bool(p.get('secret')), 'capabilities':capabilities.effective(p),'mapped_controls':capabilities.mapped_controls(p),'model_constraints':providers.model_constraints(p.get('model')),'image_controls':image_controls.options(p),'video_controls':video_controls.options(p) if p.get('kind')=='video' else None,'effective_request_timeout':providers.request_timeout(p)}
 def public_job(j):
     import image_controls
+    import video_posters
     public = {k:v for k,v in j.items() if k not in ('provider_snapshot','messages')}
     if j.get('result',{}).get('assets'):
-        public['result'] = {**j['result'], 'assets':[image_controls.describe_asset(a) for a in j['result']['assets']]}
+        public['result'] = {**j['result'], 'assets':[video_posters.public_asset(j,i,image_controls.describe_asset(a)) for i,a in enumerate(j['result']['assets'])]}
     return public

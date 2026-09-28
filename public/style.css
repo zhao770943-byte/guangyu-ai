@@ -2709,3 +2709,7 @@ dialog::backdrop {
 
 /* Work deletion and original-file diagnostics */
 .history-card-actions{display:flex;gap:8px;flex-wrap:wrap}.history-card-actions .button{flex:1;white-space:nowrap;padding:9px 10px}.button.work-delete{color:#a64454;border-color:#ead4d9}.button.work-delete:hover{background:#fff4f6;border-color:#ce8d9a}.detail-inspector .work-delete{margin-top:10px}.image-output-info{display:flex;flex-direction:column;gap:6px;padding:12px 15px;margin-top:12px;border-radius:8px;background:#f5f6fa;color:#6b768b;font-size:12px;line-height:1.65}.image-output-info strong{color:#46536c;font-weight:600}.image-output-info.mismatch{background:#fff8eb;color:#8d682b}.image-advanced .advanced-body>.button{margin-bottom:2px}
+
+.recent-thumb,.history-preview { position:relative; }
+.video-cover-play { position:absolute; left:10px; bottom:10px; display:flex; padding:6px; border-radius:8px; color:white; background:#171c2bb3; pointer-events:none; }
+.video-cover-play svg { width:20px; height:20px; }

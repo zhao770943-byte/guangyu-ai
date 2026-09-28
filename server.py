@@ -188,6 +188,10 @@ class Handler(BaseHTTPRequestHandler):
                 identity=parse_qs(urlsplit(self.path).query).get('id',[''])[0]
                 return self.json_response(storyboards.public(storyboards.require(identity)) if identity else {'boards':storyboards.list_projects()})
             if path=='/api/jobs':return self.json_response({'jobs':[storage.public_job(j) for j in storage.items('jobs',-1)]})
+            if path=='/api/video-poster':
+                import video_posters
+                query=parse_qs(urlsplit(self.path).query)
+                return self.serve_file(video_posters.get(query.get('id',[''])[0],int(query.get('index',['0'])[0])))
             if path.startswith('/api/jobs/'):
                 job=storage.get('jobs',path.rsplit('/',1)[-1]);return self.json_response(storage.public_job(job) if job else {'error':'任务不存在。'},200 if job else 404)
             if path=='/api/conversations':return self.json_response({'conversations':storage.items('conversations')})

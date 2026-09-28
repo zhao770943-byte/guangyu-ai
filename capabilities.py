@@ -53,7 +53,7 @@ def effective(provider):
             caps['aspect_ratio'] = True
             caps['resolution'] = model.startswith('gemini-3')
     elif kind == 'video' and protocol == 'comfy_h3':
-        caps.update(first_frame=True,last_frame=True,aspect_ratio=True,seed=True)
+        caps.update(first_frame=True,last_frame=True,aspect_ratio=True,seed=True,resolution=True)
     elif kind == 'video' and protocol == 'weijin_video':
         import weijin_video
         caps.update(aspect_ratio=True,reference_images=weijin_video.profile(provider).get('max_images',0)>0)

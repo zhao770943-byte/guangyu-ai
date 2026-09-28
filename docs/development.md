@@ -10,7 +10,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe launcher.py
 ```
 
-`Pillow==12.3.0` 负责验证图片上传。后端主要使用 Python 标准库，SQLite 无需独立安装。测试产生的数据与服务必须和日常使用隔离。
+`Pillow==12.3.0` 负责验证图片上传；`av==18.1.0` 读取本地视频元数据并提取封面，Windows wheel 自带 FFmpeg 库，不需单独安装 ffmpeg.exe。后端主要使用 Python 标准库，SQLite 无需独立安装。测试产生的数据与服务必须和日常使用隔离。
 
 ## 代码结构
 

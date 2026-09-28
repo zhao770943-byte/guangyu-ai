@@ -4,6 +4,7 @@ Uses native ComfyUI node contracts and the installed W4A8 + 4B configuration.
 No server plugins, global queue operations, or arbitrary workflow execution.
 """
 import re
+import math
 import secrets
 import threading
 import time
@@ -14,12 +15,14 @@ import storage
 
 MODEL='minimax-h3-local-8gb'
 SIZES={'16:9':(608,352),'9:16':(352,608),'1:1':(448,448)}
+DURATIONS={5:124,7:175,10:243,15:362}
+PROFILES={'preview':SIZES,'detail':{'16:9':(864,480),'9:16':(480,864),'1:1':(640,640)}}
 WEIGHTS={'UNETLoader':('unet_name','minimax_h3_fl2va_pruned_w4a8_mixed.safetensors'),
          'CLIPLoader':('clip_name','qwen3vl_4b_int8_convrot.safetensors'),
          'ClipProjApply':('projection','mmh3-4b-ClipProj-v3-mlp.safetensors'),
          'VAELoader':('vae_name','minimax_h3_video_vae_int8_convrot.safetensors')}
 NODES=set(WEIGHTS)|{'MiniMaxH3SigmaShift','MiniMaxH3ImageToVideo','BasicGuider','KSamplerSelect',
-                   'BasicScheduler','RandomNoise','SamplerCustomAdvanced','VAEDecodeTiled','CreateVideo','SaveVideo','LoadImage'}
+                   'BasicScheduler','RandomNoise','SamplerCustomAdvanced','VAEDecodeTiled','CreateVideo','SaveVideo','LoadImage','ImageScale'}
 SUBMIT_LOCK=threading.Lock()
 POLL_SECONDS=3
 POLL_TIMEOUT=1800
@@ -57,24 +60,44 @@ def discover(p):
                        'model_kinds':['video'],'protocol':'comfy_h3','base_url':p['base_url'],
                        'model_constraints':{'kinds':['video'],'reason':'本机首帧 / 首尾帧图生视频。'}}],
             'source':'api','base_url':p['base_url'],'protocol':'comfy_h3','pages':1,
-            'truncated':False,'supported':True,'caveat':'已检查本机节点与模型文件目录；生成成功需实际运行验证。约 5 秒、24 FPS、静音视频。'}
+            'truncated':False,'supported':True,'caveat':'已检查本机节点与模型文件目录；支持约 5 / 7 / 10 / 15 秒、24 FPS 静音视频。长片使用快速预览档；细节档用于 5 / 7 秒，实际能否完成取决于可用内存。'}
+
+def output_settings(j):
+    """Follow source geometry by default; never stretch portrait input to landscape."""
+    import uploads
+    params=j.get('parameters') or {}
+    level=params.get('resolution') or 'detail'
+    ratio=params.get('aspect_ratio')
+    if ratio:
+        w,h=PROFILES[level][ratio]
+    else:
+        first=uploads.get(j['input_assets']['first_frame'])
+        aspect=first['width']/first['height']
+        area=608*352 if level=='preview' else 864*480
+        w=math.sqrt(area*aspect);h=w/aspect
+        scale=min(1,(608 if level=='preview' else 864)/max(w,h))
+        w=max(32,round(w*scale/32)*32);h=max(32,round(h*scale/32)*32)
+    return w,h,DURATIONS[j['seconds']]
 
 def validate_job(p,j):
     validate_connection(p)
-    if j.get('seconds')!=5 or j.get('size','auto')!='auto':raise ValueError('本地 H3 8GB 配置使用约 5 秒短片，像素尺寸保持自动。')
+    if type(j.get('seconds')) is not int or j['seconds'] not in DURATIONS or j.get('size','auto')!='auto':raise ValueError('本地 H3 支持约 5、7、10、15 秒，像素尺寸保持自动。')
     assets=j.get('input_assets') or {}
     if not assets.get('first_frame'):raise ValueError('本地 H3 请先上传或从作品库选择一张首帧图片。')
     if assets.get('references'):raise ValueError('本地 H3 使用首帧 / 首尾帧，不接收多图参考列表。')
     params=j.get('parameters') or {}
-    if set(params)-{'aspect_ratio','seed'}:raise ValueError('本地 H3 只支持当前显示的画幅与随机种子参数。')
-    ratio=params.get('aspect_ratio') or '16:9'
-    if ratio not in SIZES:raise ValueError('本地 H3 支持横屏、竖屏、方形三种低显存画幅。')
+    if set(params)-{'aspect_ratio','seed','resolution'}:raise ValueError('本地 H3 只支持当前显示的画幅、清晰度与随机种子参数。')
+    ratio=params.get('aspect_ratio')
+    if ratio and ratio not in SIZES:raise ValueError('本地 H3 支持跟随首帧、横屏、竖屏、方形画幅。')
+    level=params.get('resolution') or 'detail'
+    if level not in PROFILES:raise ValueError('本地 H3 清晰度请选择快速预览或细节优先。')
+    if level=='detail' and j['seconds']>7:raise ValueError('8GB 细节优先档支持 5 / 7 秒；10 / 15 秒请选快速预览，或分镜生成后剪辑。')
     seed=params.get('seed',0)
     if type(seed) is not int or not 0<=seed<=2147483647:raise ValueError('随机种子应为 0–2147483647 的整数。')
-    return SIZES[ratio]
+    return output_settings(j)[:2]
 
 def graph(j,images):
-    w,h=SIZES[(j.get('parameters') or {}).get('aspect_ratio') or '16:9']
+    w,h,frames=output_settings(j)
     nodes={}
     def add(identity,kind,**inputs):nodes[identity]={'class_type':kind,'inputs':inputs}
     add('1','UNETLoader',unet_name=WEIGHTS['UNETLoader'][1],weight_dtype='default')
@@ -83,9 +106,13 @@ def graph(j,images):
     add('4','VAELoader',vae_name=WEIGHTS['VAELoader'][1])
     add('6','MiniMaxH3SigmaShift',model=['1',0],shift_video=12.0,shift_audio=3.0)
     add('17','LoadImage',image=images['first_frame'])
-    add('8','MiniMaxH3ImageToVideo',clip=['3',0],vae=['4',0],prompt=j['prompt'],width=w,height=h,length=124,first_frame=['17',0])
+    # Native H3 stretches the first frame. Fit both anchors before entering it.
+    add('19','ImageScale',image=['17',0],upscale_method='lanczos',width=w,height=h,crop='center')
+    add('8','MiniMaxH3ImageToVideo',clip=['3',0],vae=['4',0],prompt=j['prompt'],width=w,height=h,length=frames,first_frame=['19',0])
     if images.get('last_frame'):
-        add('18','LoadImage',image=images['last_frame']);nodes['8']['inputs']['last_frame']=['18',0]
+        add('18','LoadImage',image=images['last_frame'])
+        add('20','ImageScale',image=['18',0],upscale_method='lanczos',width=w,height=h,crop='center')
+        nodes['8']['inputs']['last_frame']=['20',0]
     add('9','BasicGuider',model=['6',0],conditioning=['8',0])
     add('10','KSamplerSelect',sampler_name='euler')
     add('11','BasicScheduler',model=['6',0],scheduler='simple',steps=20,denoise=1.0)
@@ -138,12 +165,17 @@ def download(p,j,item):
                 f.write(chunk)
         with temp.open('rb') as f:
             if f.read(12)[4:8]!=b'ftyp':raise ValueError('输出并非 MP4 文件。')
+        import av
+        with av.open(str(temp)) as container:
+            stream=container.streams.video[0]
+            w,h=stream.width,stream.height
+            duration=float(stream.duration*stream.time_base) if stream.duration is not None else None
         temp.replace(path)
     except Exception:
         raise providers.ProviderError('本机 H3 已完成，但视频保存失败。请继续查询原任务重试保存，不要重新生成。') from None
     finally:temp.unlink(missing_ok=True)
-    w,h=SIZES[(j.get('parameters') or {}).get('aspect_ratio') or '16:9']
-    return {'text':'','assets':[{'type':'video','local':True,'url':'/media/'+path.name,'width':w,'height':h,'duration_seconds':124/24}]}
+    # Actual output metadata also handles resumed jobs from older profile versions.
+    return {'text':'','assets':[{'type':'video','local':True,'url':'/media/'+path.name,'width':w,'height':h,'duration_seconds':duration}]}
 
 def poll(p,j):
     identity=j.get('upstream_id','')

@@ -1,2 +1,4 @@
 # Image upload verification; tested on Windows with Python 3.12.
 Pillow==12.3.0
+# Bundled FFmpeg libraries: video metadata and local JPEG covers, no external executable.
+av==18.1.0

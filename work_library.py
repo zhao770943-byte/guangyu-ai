@@ -21,6 +21,9 @@ def cleanup(job):
     pending = []
     for url in job.get('work_cleanup_pending', []):
         try:
+            if url.endswith(('.mp4','.webm')):
+                import video_posters
+                local_path(video_posters.cache_url(url)).unlink(missing_ok=True)
             local_path(url).unlink(missing_ok=True)
         except (OSError, ValueError):
             pending.append(url)

@@ -6,9 +6,18 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import comfy_h3,storage,uploads,providers,model_catalog,capabilities,video_controls,work_library
+import av
 
 ID='12345678-1234-1234-1234-123456789abc'
-MP4=b'\0\0\0\x18ftypisom'+b'fixture'*10
+def sample_video():
+    out=io.BytesIO()
+    with av.open(out,'w',format='mp4') as container:
+        stream=container.add_stream('libx264',rate=24);stream.width=64;stream.height=64;stream.pix_fmt='yuv420p'
+        for _ in range(12):
+            for packet in stream.encode(av.VideoFrame.from_image(Image.new('RGB',(64,64),'red'))):container.mux(packet)
+        for packet in stream.encode():container.mux(packet)
+    return out.getvalue()
+MP4=sample_video()
 def info():
     data={node:{'input':{}} for node in comfy_h3.NODES}
     for node,(field,weight) in comfy_h3.WEIGHTS.items():data[node]['input']={'required':{field:[[weight]]}}
@@ -51,18 +60,20 @@ class H3Tests(unittest.TestCase):
         self.assertEqual([c[0] for c in Fixture.calls],['GET'])
         caps=capabilities.effective(self.p)
         self.assertTrue(caps['first_frame'] and caps['last_frame']);self.assertFalse(caps['reference_images'] or caps['audio'])
-        self.assertEqual(video_controls.options(self.p)['durations'],[5])
+        self.assertEqual(video_controls.options(self.p)['durations'],[5,7,10,15])
     def test_submit_uploads_frames_maps_graph_saves_mp4_and_resume_never_posts(self):
         providers.validate(self.p)
         result=providers.execute(self.p,self.job)
         posts=[c for c in Fixture.calls if c[0]=='POST']
         self.assertEqual([c[1] for c in posts],['/upload/image','/upload/image','/prompt'])
-        graph=posts[-1][2]['prompt'];self.assertEqual(graph['8']['inputs']['width'],352)
-        self.assertEqual(graph['8']['inputs']['length'],124);self.assertEqual(graph['8']['inputs']['last_frame'],['18',0])
+        graph=posts[-1][2]['prompt'];self.assertEqual(graph['8']['inputs']['width'],480)
+        self.assertEqual(graph['8']['inputs']['length'],124);self.assertEqual(graph['8']['inputs']['last_frame'],['20',0])
+        self.assertEqual(graph['8']['inputs']['first_frame'],['19',0]);self.assertEqual(graph['19']['inputs']['crop'],'center')
         self.assertEqual(graph['12']['inputs']['noise_seed'],12)
         self.assertTrue(all(c[3] is None for c in Fixture.calls))
         asset=result['assets'][0];self.assertTrue(asset['local']);self.assertEqual((storage.DATA/asset['url'].lstrip('/')).read_bytes(),MP4)
         self.assertEqual(work_library.local_path(asset['url']),(storage.DATA/asset['url'].lstrip('/')))
+        self.assertEqual((asset['width'],asset['height'],asset['duration_seconds']),(64,64,.5),'Read actual file metadata, including resumed legacy jobs')
         Fixture.calls=[];providers.execute(self.p,storage.get('jobs',self.job['id']),resume=True)
         self.assertFalse(any(c[0]=='POST' for c in Fixture.calls))
     def test_busy_queue_rejects_without_upload_or_submission(self):
@@ -77,6 +88,18 @@ class H3Tests(unittest.TestCase):
     def test_invalid_inputs_rejected_before_network(self):
         for changes in ({'seconds':30},{'size':'1920x1080'},{'input_assets':{}},{'parameters':{'aspect_ratio':'21:9'}},{'parameters':{'audio':True}}):
             with self.assertRaises(ValueError):providers.build(self.p,{**self.job,**changes})
+        self.assertEqual(Fixture.calls,[])
+    def test_follow_portrait_geometry_and_long_duration_profiles(self):
+        raw=io.BytesIO();Image.new('RGB',(940,1672),'blue').save(raw,format='PNG')
+        asset=uploads.save({'data_base64':base64.b64encode(raw.getvalue()).decode()})
+        j={**self.job,'input_assets':{'first_frame':asset['id']},'parameters':{}}
+        self.assertEqual(comfy_h3.output_settings(j),(480,864,124))
+        for seconds,frames in ((5,124),(7,175),(10,243),(15,362)):
+            job={**j,'seconds':seconds,'parameters':{'resolution':'preview'}}
+            providers.build(self.p,job)
+            g=comfy_h3.graph(job,{'first_frame':'portrait.png'})
+            self.assertEqual((g['8']['inputs']['width'],g['8']['inputs']['height'],g['8']['inputs']['length']),(352,608,frames))
+        with self.assertRaisesRegex(ValueError,'细节'):providers.build(self.p,{**j,'seconds':15})
         self.assertEqual(Fixture.calls,[])
     def test_runtime_error_and_missing_history_never_repost(self):
         j=storage.update_job(self.job['id'],upstream_id=ID)

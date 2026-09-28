@@ -147,7 +147,7 @@ PRESETS.insert(len(PRESETS)-1,{'id':'comfy_h3','name':'本地 MiniMax H3 / Comfy
                  'protocols':{'video':'comfy_h3'},'discovery_protocol':'comfy_h3','allow_local':True,
                  'api_key_url':'http://127.0.0.1:8188','api_key_label':'打开本机 ComfyUI',
                  'docs_url':'https://docs.comfy.org/tutorials/video/minimax/minimax-h3',
-                 'note':'无需 API Key。自动检查本机 H3 W4A8、4B ClipProj 模型与节点；首帧或首尾帧生成约 5 秒静音视频。'})
+                 'note':'无需 API Key。自动检查本机 H3 W4A8、4B ClipProj 模型与节点；首帧 / 首尾帧生成，自动跟随画幅，支持约 5–15 秒静音视频及两档清晰度。'})
 CATALOG_TYPES['comfy_h3']=['video']
 for item in PRESETS:
     item['model_types']=CATALOG_TYPES[item['id']]

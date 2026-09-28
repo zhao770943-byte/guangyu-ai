@@ -56,6 +56,7 @@ def build():
         '--windowed', '--name', 'GuangyuAI', '--icon', str(icon_path),
         '--distpath', str(DIST), '--workpath', str(BUILD / 'pyinstaller'),
         '--specpath', str(BUILD), '--add-data', str(ROOT / 'public') + os.pathsep + 'public',
+        '--collect-all', 'av',
         '--paths', str(ROOT), str(ROOT / 'desktop.py'),
     ], cwd=ROOT, check=True)
     bundle = DIST / 'GuangyuAI'
@@ -87,9 +88,10 @@ def build():
         raise RuntimeError('Python license is missing.')
     shutil.copy2(python_license, licenses / 'Python-LICENSE.txt')
     dependency_license('pillow', licenses)
+    dependency_license('av', licenses)
     dependency_license('pyinstaller', licenses)
     (bundle / 'THIRD_PARTY_NOTICES.txt').write_text(
-        'This bundle includes CPython, Pillow and the PyInstaller bootloader.\n'
+        'This bundle includes CPython, Pillow, PyAV (with FFmpeg libraries) and the PyInstaller bootloader.\n'
         'Their license terms are included in third-party-licenses/.\n'
         'The Pillow license bundle includes its third-party library notices.\n'
         'PyInstaller distribution exception applies to generated application bundles.\n'
@@ -97,6 +99,7 @@ def build():
     info = {'version': VERSION, 'platform': 'windows-x64', 'python': platform.python_version(),
             'pyinstaller': importlib.metadata.version('pyinstaller'),
             'pillow': importlib.metadata.version('pillow'),
+            'av': importlib.metadata.version('av'),
             'built_at_utc': datetime.now(timezone.utc).isoformat(), 'code_signed': False}
     (bundle / 'build-info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
     archive = DIST / ('GuangyuAI-v' + VERSION + '-windows-x64.zip')

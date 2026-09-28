@@ -21,6 +21,17 @@ async function run(){
   assert.equal(vm.runInContext('state.drafts.video.size',context),'auto');
   assert.match(elements['#page'].innerHTML,/data-mode="text"[^>]*disabled/);
   assert.throws(()=>vm.runInContext("payloadFor('video')",context),/首帧/);
+  vm.runInContext(`state.providers[0].capabilities.resolution=true;Object.assign(state.providers[0].video_controls,{durations:[5,7,10,15],duration_frames:{5:124,7:175,10:243,15:362},resolution_options:[['detail','细节优先'],['preview','快速预览']],profiles:{detail:{'16:9':[864,480]},preview:{'16:9':[608,352]}}});state.assets['portrait']={width:940,height:1672};state.drafts.video.assets.first_frame='portrait';state.drafts.video.parameters={};state.drafts.video.prompt='A continuous walking shot';renderStudio('video');`,context);
+  assert.equal(vm.runInContext("state.drafts.video.parameters.aspect_ratio||''",context),'','Default must follow source, not force landscape');
+  assert.equal(vm.runInContext("h3OutputPreview(chosen('video'),state.drafts.video)",context),'480 × 864 · 5.17 秒 · 124 帧 · 24 FPS · 静音');
+  assert.match(elements['#page'].innerHTML,/跟随首帧/);
+  vm.runInContext('toast=()=>{}',context);
+  elements['#seconds-input'].oninput({target:{value:'10'}});
+  assert.equal(vm.runInContext('state.drafts.video.parameters.resolution',context),'preview');
+  assert.equal(vm.runInContext("payloadFor('video').seconds",context),10);
+  assert.match(elements['#video-request-preview'].textContent,/352 × 608 · 10.13 秒 · 243 帧/);
+  assert.match(vm.runInContext("mediaCover({type:'video',url:'/media/abcd.mp4',poster_url:'/api/video-poster?id=abcd&index=0'},'test','video')",context),/<img[^>]+video-poster[^>]+data-video-cover/);
+  assert.match(vm.runInContext("resultHTML({id:'a',kind:'video',status:'succeeded',model:'h3',prompt:'test',seconds:7,result:{assets:[{type:'video',url:'/media/abcd.mp4',poster_url:'/api/video-poster?id=abcd&index=0'}]}})",context),/<video[^>]+poster=/);
   vm.runInContext(`state.providers=[];state.drafts.video=makeDraft();`,context);
   assert.equal(vm.runInContext("connectionMappingIssues('weijin_video','video',{}).length",context),0);
   assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{}).length",context),2);
