@@ -142,7 +142,7 @@ def _accumulate(metrics, job, tokens, elapsed):
     if status != 'succeeded':
         return
     result = job.get('result') if isinstance(job.get('result'), dict) else {}
-    assets = result.get('assets') if isinstance(result.get('assets'), list) else []
+    assets = (job.get('generated_assets_summary') or []) if job.get('work_deleted_at') else (result.get('assets') if isinstance(result.get('assets'), list) else [])
     images = [asset for asset in assets if isinstance(asset, dict) and asset.get('type') == 'image']
     videos = [asset for asset in assets if isinstance(asset, dict) and asset.get('type') == 'video']
     metrics['image_count'] += len(images)

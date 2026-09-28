@@ -10,6 +10,7 @@ const context=vm.createContext({console,setTimeout,clearTimeout,
   FileReader:class {readAsDataURL(){this.result='data:image/png;base64,dGVzdA==';this.onload()}},
 });
 vm.runInContext(fs.readFileSync(path.join(root,'public/video-controls.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(root,'public/image-controls.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
 async function run(){
   await vm.runInContext(`(async()=>{
@@ -32,6 +33,22 @@ async function run(){
   assert.equal(payload.input_assets.first_frame,'first-fixture');
   assert.equal(payload.input_assets.last_frame,'last-fixture');
   assert.match(elements['#video-request-preview'].textContent,/9:16 · 1080p · 6 秒/);
-  console.log('PASS first/tail mode retention, immediate draft updates, typed parameters and payload');
+  await vm.runInContext(`(async()=>{
+    state.providers=[{id:'image-fixture',kind:'image',model:'fixture',protocol:'openai_image',capabilities:{quality:true,background:true,output_format:true}}];
+    state.drafts.image.prompt='Retain this landscape';state.drafts.image.assets.references=['keep-reference'];
+    state.drafts.image.size='2160x3840';state.drafts.image.parameters={quality:'max',background:'transparent'};
+    resetImageParameters();
+    if(state.drafts.image.prompt!=='Retain this landscape'||state.drafts.image.assets.references[0]!=='keep-reference')throw Error('Reset lost creative input');
+    if(state.drafts.image.size!=='auto'||Object.keys(payloadFor('image').parameters).length)throw Error('Manual parameters survived reset');
+    if(!imageOutputInfo({size:'2160x3840',parameters:{}},{type:'image',width:940,height:1672}).includes('不一致'))throw Error('Missing mismatch notice');
+    const job={id:'delete-fixture',kind:'image',prompt:'fixture',status:'succeeded',archive_status:'saved',result:{assets:[{type:'image',url:'/media/aaaa.png'}]}};
+    state.jobs=[job];state.currentJob.image=job.id;state.detail=job.id;
+    confirmAction=async()=>false;api=async()=>{throw Error('Cancel must not call API')};
+    await deleteWork(job.id);if(libraryWorks().length!==1)throw Error('Cancel deleted work');
+    confirmAction=async()=>true;api=async()=>({...job,result:{assets:[]},work_deleted_at:'fixture'});render=()=>{};
+    await deleteWork(job.id);
+    if(libraryWorks().length||currentJob('image')||state.detail||state.currentJob.image)throw Error('Deleted work remains selected');
+  })()`,context);
+  console.log('PASS video controls, image parameter reset, output mismatch, delete confirmation/cancellation and selection cleanup');
 }
 run().catch(error=>{console.error(error);process.exitCode=1});

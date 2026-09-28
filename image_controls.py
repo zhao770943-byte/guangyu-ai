@@ -1,6 +1,27 @@
 """Image canvas presets shared by the UI and request validation."""
 import math
 import re
+from functools import lru_cache
+
+
+@lru_cache(maxsize=512)
+def _image_info(path, modified, size):
+    from PIL import Image
+    with Image.open(path) as image:
+        return {'width':image.width, 'height':image.height, 'file_bytes':size}
+
+
+def describe_asset(asset):
+    """Read file headers without resampling or rewriting the original image."""
+    if asset.get('type') != 'image' or not asset.get('local'):
+        return asset
+    try:
+        import work_library
+        path = work_library.local_path(asset.get('url'))
+        stat = path.stat()
+        return {**asset, **_image_info(str(path), stat.st_mtime_ns, stat.st_size)}
+    except (OSError, ValueError):
+        return asset
 
 RATIOS = [('9:16', '抖音竖屏'), ('16:9', 'B站横屏'), ('1:1', '方形配图'),
           ('3:4', '小红书竖图'), ('4:3', '横向图文'), ('2:3', '人物海报'),
@@ -32,7 +53,7 @@ def options(provider):
         result['quality'] = [['standard', '标准'], ['hd', '高清']] if model == 'dall-e-3' else [
             ['low', '快速草稿'], ['medium', '均衡'], ['high', '精细']]
         if model.startswith('gpt-image-2.5'):
-            result['quality'] += [['xhigh', '超精细'], ['max', '最高质量']]
+            result['quality'] += [['xhigh', 'xhigh · 平台扩展'], ['max', 'max · 平台扩展']]
     if protocol == 'openai_image' and flexible(model):
         result.update(mode='pixels', levels=[['standard', '标准'], ['large', '高清 · 长边约 2K'],
                                             ['ultra', '超清 · 最高约 8MP（实验性）']])

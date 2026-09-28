@@ -4,7 +4,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
-import providers, storage, capabilities, uploads, usage, model_catalog, media_store
+import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 VERSION = '2.3.1'
@@ -51,6 +51,8 @@ def run_archive(identity,release=True):
 
 def dispatch_archive(job):
     with ACTIVE_LOCK:
+        job=storage.get('jobs',job['id'])
+        if job.get('work_deleted_at'):raise ValueError('作品已删除，不能重新保存。')
         if job['id'] in ACTIVE:return storage.get('jobs',job['id'])
         if len(ACTIVE)>=12:raise ValueError('当前任务较多，请稍后重试保存。')
         job=storage.update_job(job['id'],archive_status='pending')
@@ -59,6 +61,9 @@ def dispatch_archive(job):
 
 def recover():
     for job in storage.items('jobs',10000):
+        if job.get('work_deleted_at'):
+            if job.get('work_cleanup_pending'):work_library.cleanup(job)
+            continue
         if job['status']=='polling' and job.get('upstream_id'):dispatch(job,resume=True)
         elif job['status'] in STATUS_ACTIVE:storage.update_job(job['id'],status='interrupted',finished_at=storage.now(),error='上次运行被中断。未自动重新提交，以免重复计费；请先在平台核对任务。')
         elif job['status']=='succeeded' and job.get('result',{}).get('assets') and job.get('archive_status') in (None,'pending'):
@@ -234,6 +239,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not p:raise ValueError('连接不存在。')
                 return self.json_response({'models':providers.models(p)})
             if self.path=='/api/jobs':return self.json_response(create_job(body),202)
+            if self.path=='/api/jobs/delete':
+                with ACTIVE_LOCK:
+                    if body.get('id') in ACTIVE:raise ValueError('作品正在生成或保存，请稍后再删除。')
+                    job=work_library.remove(body.get('id',''))
+                return self.json_response(storage.public_job(job))
             if self.path=='/api/jobs/archive':
                 job=storage.get('jobs',body.get('id',''))
                 if not job or job['status']!='succeeded' or not job.get('result',{}).get('assets'):raise ValueError('没有可保存的作品。')
