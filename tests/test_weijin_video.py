@@ -16,6 +16,7 @@ MP4=b'\x00\x00\x00\x18ftypisom'+b'fixture-video-content'*8
 
 class Fixture(BaseHTTPRequestHandler):
     calls=[]
+    catalog=[MODEL]
     def log_message(self,*args):pass
     def reply(self,body,code=200,headers=None):
         raw=json.dumps(body).encode() if isinstance(body,dict) else body
@@ -24,7 +25,7 @@ class Fixture(BaseHTTPRequestHandler):
         self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
     def do_GET(self):
         self.calls.append(('GET',self.path,self.headers.get('Authorization'),None))
-        if self.path=='/v1/models':return self.reply({'data':[MODEL]})
+        if self.path=='/v1/models':return self.reply({'data':self.catalog})
         if self.path.endswith('/content'):return self.reply(b'',307,{'Location':f'http://127.0.0.1:{self.server.server_port}/cdn.mp4'})
         if self.path=='/cdn.mp4':return self.reply(MP4)
         return self.reply({'id':'task_fixture','status':'completed'})
@@ -40,7 +41,7 @@ class WeijinTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.data=patch.object(storage,'DATA',Path(self.temp.name));self.data.start();self.addCleanup(self.data.stop);storage.init()
         self.app=ThreadingHTTPServer(('127.0.0.1',0),Fixture);threading.Thread(target=self.app.serve_forever,daemon=True).start()
-        self.addCleanup(self.app.server_close);self.addCleanup(self.app.shutdown);Fixture.calls=[]
+        self.addCleanup(self.app.server_close);self.addCleanup(self.app.shutdown);Fixture.calls=[];Fixture.catalog=[MODEL]
         self.p={'name':'fixture','kind':'video','protocol':'weijin_video','model':MODEL['id'],
                 'base_url':f'http://127.0.0.1:{self.app.server_port}/v1','allow_local':True,
                 'secret':storage.crypt('fixture-key'),'extra':{},'video_model_metadata':MODEL}
@@ -71,6 +72,43 @@ class WeijinTests(unittest.TestCase):
         with patch.object(weijin_video,'metadata',return_value={'durations_seconds':[15],'ratios':['16:9'],'max_images':0,'resolution':'720p'}):
             with self.assertRaises(ValueError):weijin_video.execute(self.p,self.job)
         self.assertFalse(any(c[0]=='POST' for c in Fixture.calls))
+
+    def test_id_only_catalog_uses_documented_model_once(self):
+        # Actual provider response lacks the advertised capability extensions.
+        Fixture.catalog=[{'id':MODEL['id'],'object':'model','owned_by':'one-api'}]
+        self.p['video_model_metadata']={'durations_seconds':[4],'ratios':['1:1']}
+        # The submit-time profile must not trust a stale saved connection.
+        with patch.object(providers.time,'sleep'):
+            weijin_video.execute(self.p,self.job)
+        posts=[c for c in Fixture.calls if c[0]=='POST']
+        self.assertEqual(len(posts),1)
+        self.assertEqual(posts[0][1],'/v1/videos')
+        self.assertEqual(posts[0][3]['seconds'],30)
+        self.assertEqual(posts[0][3]['aspect_ratio'],'16:9')
+
+    def test_missing_model_and_unknown_id_do_not_use_saved_metadata(self):
+        for rows,identity in [([],MODEL['id']),([{'id':'unknown-video'}],'unknown-video')]:
+            with self.subTest(model=identity):
+                Fixture.catalog=rows;Fixture.calls=[]
+                with self.assertRaises(ValueError):
+                    weijin_video.execute({**self.p,'model':identity},self.job)
+                self.assertEqual([c[0] for c in Fixture.calls],['GET'])
+
+    def test_partial_or_invalid_live_capabilities_do_not_fallback(self):
+        for extra in [{'durations_seconds':[]},{'ratios':None},{'resolution':'720p'},
+                      {'durations_seconds':[30],'ratios':['unsupported']}]:
+            with self.subTest(extra=extra):
+                Fixture.catalog=[{'id':MODEL['id'],**extra}];Fixture.calls=[]
+                with self.assertRaises(ValueError):weijin_video.execute(self.p,self.job)
+                self.assertEqual([c[0] for c in Fixture.calls],['GET'])
+
+    def test_id_only_catalog_still_rejects_bad_duration_and_ratio(self):
+        Fixture.catalog=[{'id':MODEL['id']}]
+        for override in [{'seconds':4},{'parameters':{'aspect_ratio':'1:1'}}]:
+            with self.subTest(override=override):
+                Fixture.calls=[]
+                with self.assertRaises(ValueError):weijin_video.execute(self.p,{**self.job,**override})
+                self.assertEqual([c[0] for c in Fixture.calls],['GET'])
 
     def test_discovery_is_host_scoped_and_preserves_constraints(self):
         p={**self.p,'base_url':'https://www.weijinapi.top/v1','platform':'custom','protocol':'openai_chat'}

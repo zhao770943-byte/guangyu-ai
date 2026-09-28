@@ -29,6 +29,19 @@ def profile(p):
     return {}
 
 
+def submission_profile(item, model):
+    """Fresh restrictions win; ID-only catalogs may use a documented profile.
+
+    Do not reuse saved metadata for unknown models, or hide incomplete/invalid
+    live restrictions with a fallback. Model availability is checked separately.
+    """
+    found=metadata(item)
+    if found:return found
+    if isinstance(item,dict) and not any(k in item for k in ('durations_seconds','ratios','max_images','resolution')):
+        return profile({'model':model})
+    return {}
+
+
 def validate(p,job):
     info=profile(p)
     if not info:raise ValueError('此维今型号缺少时长和画幅能力，请重新获取模型列表后保存。')
@@ -53,8 +66,8 @@ def execute(p,job):
     rows=catalog.get('data',[])
     item=next((v for v in rows if isinstance(v,dict) and v.get('id')==p['model']),None) if isinstance(rows,list) else None
     if item is None:raise ValueError('当前密钥的目录中没有该视频型号，请重新获取模型。尚未提交生成。')
-    live=metadata(item)
-    if not live:raise ValueError('平台未返回此视频型号的时长和比例能力，尚未提交生成。')
+    live=submission_profile(item,p['model'])
+    if not live:raise ValueError('平台未返回完整有效的视频能力，且无法使用已核对的型号配置。请重新获取模型或核对平台文档；尚未提交生成。')
     current={**p,'video_model_metadata':live}
     body=validate(current,job)
     images=[]
