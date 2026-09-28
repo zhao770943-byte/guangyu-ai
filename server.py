@@ -7,7 +7,7 @@ import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
 import providers, storage, capabilities, uploads, usage, model_catalog
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '2.2.0'
+VERSION = '2.2.1'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)

@@ -85,6 +85,10 @@ class Fixture(BaseHTTPRequestHandler):
             return self.send({}, 302, {'Location': f'http://127.0.0.1:{self.server.server_port}/redirect-target'})
         if parsed.path == '/custom/catalog':
             return self.send({'items': [{'id': 'gpt-custom-chat', 'name': 'Custom model'}]})
+        if parsed.path == '/custom-default/models':
+            if self.headers.get('X-Custom-Key') != KEY or self.headers.get('Authorization'):
+                return self.send({'error': {'message': 'wrong custom directory authentication'}}, 401)
+            return self.send({'models': [{'id': 'gpt-custom-default'}]})
         if parsed.path == '/dual/custom-catalog':
             if self.headers.get('X-Catalog-Key') != 'Catalog ' + KEY or self.headers.get('Authorization'):
                 return self.send({'error': {'message': 'wrong custom directory authentication'}}, 401)
@@ -319,16 +323,29 @@ class DiscoveryTests(unittest.TestCase):
         self.discover(allow_local=False, status=400)
         self.assertFalse(CALLS)
 
-    def test_custom_missing_path_and_unsupported_presets_return_manual_fallback(self):
-        value = self.discover('/custom', 'custom')
-        self.assertFalse(value['supported'])
-        self.assertEqual(value['models'], [])
+    def test_every_preset_reads_the_actual_destination_even_with_legacy_support_metadata(self):
+        for platform in ('dashscope', 'zhipu', 'minimax', 'ark'):
+            value = self.discover('/single', platform=platform)
+            self.assertTrue(value['supported'])
+            self.assertEqual([item['id'] for item in value['models']], ['gpt-single'])
+            self.assertEqual(CALLS[-1]['path'], '/single/models')
         with patch.object(model_catalog.platform_catalog, 'get_preset', return_value={
             'id': 'fixture-unsupported', 'base_url': self.upstream + '/single',
             'protocols': {'chat': 'openai_chat'}, 'discovery_protocol': 'unsupported', 'note': 'No list API'}):
             value = self.discover(platform='fixture-unsupported')
-            self.assertFalse(value['supported'])
-        self.assertFalse(CALLS)
+            self.assertEqual([item['id'] for item in value['models']], ['gpt-single'])
+        self.assertEqual(len(CALLS), 5)
+        self.assertTrue(all(call['method'] == 'GET' and call['path'] == '/single/models' for call in CALLS))
+        self.assertFalse(storage.items('providers'))
+        self.assertFalse(storage.items('jobs'))
+
+    def test_custom_directory_without_path_reads_default_models_path(self):
+        value = self.discover('/custom-default', 'custom', custom={'auth_header': 'X-Custom-Key', 'auth_prefix': ''})
+        self.assertEqual([item['id'] for item in value['models']], ['gpt-custom-default'])
+        self.assertEqual(value['models'][0]['protocol'], 'custom')
+        self.assertEqual(len(CALLS), 1)
+        self.assertEqual(CALLS[0]['method'], 'GET')
+        self.assertEqual(CALLS[0]['path'], '/custom-default/models')
 
     def test_empty_malformed_and_partial_lists_are_distinct(self):
         self.assertEqual(self.discover('/empty')['models'], [])
@@ -360,8 +377,13 @@ class DiscoveryTests(unittest.TestCase):
     def test_redirects_and_missing_list_endpoint_do_not_trigger_fallback_calls(self):
         self.discover('/redirect', status=502)
         self.assertEqual([call['path'] for call in CALLS], ['/redirect/models'])
-        error = self.discover('/unsupported', status=502)
-        self.assertIn('手动填写', error['error'])
+        CALLS.clear()
+        error = self.discover('/unsupported', 'custom', status=502)
+        self.assertIn('HTTP 404', error['error'])
+        self.assertNotIn('手动', error['error'])
+        self.assertNotIn('models', error)
+        self.assertEqual([call['path'] for call in CALLS], ['/unsupported/models'])
+        self.assertTrue(all(call['method'] == 'GET' for call in CALLS))
 
     def test_model_discovery_csrf_origin_host_guards(self):
         body = self.config()
@@ -378,6 +400,43 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(saved['platform'], 'custom')
         result = self.api('/api/providers/check', {'id': saved['id']})
         self.assertEqual(result, {'models': ['gpt-single']})
+
+    def test_platform_catalog_api_key_links_are_official_https_metadata(self):
+        official_hosts = {
+            'openai': 'platform.openai.com',
+            'anthropic': 'platform.claude.com',
+            'gemini': 'aistudio.google.com',
+            'deepseek': 'platform.deepseek.com',
+            'siliconflow': 'cloud.siliconflow.cn',
+            'openrouter': 'openrouter.ai',
+            'xai': 'console.x.ai',
+            'ollama': 'ollama.com',
+            'lmstudio': 'lmstudio.ai',
+            'moonshot': 'platform.kimi.com',
+            'dashscope': 'bailian.console.aliyun.com',
+            'zhipu': 'bigmodel.cn',
+            'minimax': 'platform.minimax.cn',
+            'ark': 'console.volcengine.com',
+        }
+        catalog = {item['id']: item for item in self.api('/api/platforms')['platforms']}
+        self.assertEqual(set(catalog), set(official_hosts) | {'custom'})
+        for identity, hostname in official_hosts.items():
+            with self.subTest(platform=identity):
+                item = catalog[identity]
+                link = urllib.parse.urlsplit(item['api_key_url'])
+                self.assertEqual(link.scheme, 'https')
+                self.assertEqual(link.hostname, hostname)
+                self.assertIsNone(link.username)
+                self.assertIsNone(link.password)
+                self.assertIsNone(link.port)
+                self.assertFalse(link.query)
+                self.assertFalse(link.fragment)
+                self.assertTrue(link.path.startswith('/'))
+                self.assertEqual(item['api_key_label'],
+                                 '下载本机服务' if identity in ('ollama', 'lmstudio') else '获取 API Key')
+        self.assertFalse(catalog['custom'].get('api_key_url'))
+        self.assertFalse(catalog['custom'].get('api_key_label'))
+        self.assertFalse(CALLS)
 
 
 if __name__ == '__main__':

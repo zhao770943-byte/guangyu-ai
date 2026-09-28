@@ -25,7 +25,7 @@ TIMEOUT = 15
 TOTAL_TIMEOUT = 45
 KINDS = {'chat', 'image', 'video'}
 PROTOCOLS = set().union(*providers.PROTOCOLS.values())
-CAVEAT = '列表来自当前地址的只读模型接口；列出模型不代表已验证生成权限、余额或全部能力。用途按已适配模型系列提示，未知用途可手动选择协议；专有接口可使用自定义 JSON 映射。'
+CAVEAT = '列表来自当前地址的只读模型接口；列出模型不代表已验证生成权限、余额或全部能力。用途按已适配模型系列提示，未知用途需确认用途与协议；专有接口可使用自定义 JSON 映射。'
 
 
 def preset(identity):
@@ -101,15 +101,11 @@ def prepare(body):
 
 
 def _family(provider):
-    path = (provider.get('custom') or {}).get('discovery_path')
-    selected = preset(provider.get('platform')) or {}
-    if selected.get('discovery_protocol') == 'unsupported' and not path:
-        return 'unsupported'
+    # Listing is explicitly requested against the supplied destination. Preset
+    # support metadata cannot decide whether a user's proxy exposes a catalog.
     protocol = provider['protocol']
     if protocol in ('anthropic', 'gemini'):
         return protocol
-    if protocol == 'custom' and not path:
-        return 'unsupported'
     return 'openai'
 
 
@@ -127,7 +123,7 @@ def _request(provider, path, key, timeout):
         with providers.OPENER.open(request, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE + 1)
         if len(raw) > MAX_RESPONSE:
-            raise providers.ProviderError('模型列表响应超过 4 MiB，请缩小平台列表或手动填写模型。')
+            raise providers.ProviderError('模型目录响应超过 4 MiB，已停止读取。请检查目录接口或在平台侧缩小目录范围后重试。')
         try:
             value = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
@@ -141,7 +137,7 @@ def _request(provider, path, key, timeout):
         if 300 <= ex.code < 400:
             raise providers.ProviderError('模型列表接口返回重定向；为保护密钥未跟随。请填写最终 API 基础地址。') from None
         if ex.code in (404, 405, 501):
-            raise providers.ProviderError('平台不支持当前模型列表接口，可手动填写模型 ID 或配置自定义模型列表路径。这不表示生成接口不可用。') from None
+            raise providers.ProviderError(f'模型目录获取失败（HTTP {ex.code}）：当前地址未提供可读取的模型目录。请检查 API 基础地址、目录路径和平台权限后重试。') from None
         raw = ex.read(8000).decode('utf-8', errors='replace')
         detail = ''
         try:
@@ -245,12 +241,7 @@ def discover_saved(provider):
     family = _family(catalog_provider)
     report = {'models': [], 'source': 'api', 'base_url': provider['base_url'],
               'protocol': provider['protocol'], 'pages': 0, 'truncated': False,
-              'supported': family != 'unsupported', 'caveat': CAVEAT}
-    if family == 'unsupported':
-        selected = preset(provider.get('platform')) or {}
-        note = selected.get('note', '此自定义协议尚未配置只读模型列表路径。')
-        report.update(source='unsupported', caveat=note + ' 可手动填写模型 ID，或配置自定义 GET 列表路径；未向平台发送请求。')
-        return report
+              'supported': True, 'caveat': CAVEAT}
     base_path = providers.validate_discovery_path((provider.get('custom') or {}).get('discovery_path')) or '/models'
     fixed_query = {'pageSize': 1000} if family == 'gemini' else ({'limit': 1000} if family == 'anthropic' else {})
     query = dict(fixed_query)
@@ -298,7 +289,7 @@ def discover_saved(provider):
     if malformed:
         report['caveat'] += f' 已忽略 {malformed} 条格式无效的模型记录。'
     if report['truncated']:
-        report['caveat'] += ' 列表达到读取上限，当前为部分结果，可手动填写未显示的模型。'
+        report['caveat'] += ' 目录达到读取上限，当前仅展示已获取的部分模型。'
     return report
 
 

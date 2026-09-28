@@ -122,6 +122,7 @@ document.addEventListener('click',async e=>{const el=e.target.closest('button,[d
  if(el.dataset.historyFilter){state.filter=el.dataset.historyFilter;return renderHistory()}
  if(el.dataset.detail){state.detail=el.dataset.detail;return renderHistory()}
  if(el.dataset.reuse)return reuseJob(el.dataset.reuse);
+ if(el.dataset.discoverProvider)return editProvider(el.dataset.discoverProvider,null,{autoDiscover:true});
  if(el.dataset.edit)return editProvider(el.dataset.edit);
  if(el.dataset.addKind)return editProvider(null,el.dataset.addKind);
  if(el.dataset.conversation){conversationVersion++;state.conversationId=el.dataset.conversation;return renderAssistantPage()}
