@@ -122,12 +122,18 @@ def _request(provider, path, key, timeout):
     try:
         with providers.OPENER.open(request, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE + 1)
+            status=response.status
+            content_type=response.headers.get_content_type()
         if len(raw) > MAX_RESPONSE:
             raise providers.ProviderError('模型目录响应超过 4 MiB，已停止读取。请检查目录接口或在平台侧缩小目录范围后重试。')
         try:
             value = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
-            raise providers.ProviderError('模型列表接口未返回 JSON，请核对 API 基础地址和列表路径。') from None
+            request_path=_redact(urllib.parse.urlsplit(request.full_url).path,key,300)
+            html=content_type=='text/html' or raw.lstrip().lower().startswith((b'<!doctype html',b'<html'))
+            detail='返回了 HTML 网页，可能是网站首页、登录页或防护页面。' if html else ('响应内容为空。' if not raw.strip() else '返回内容不是有效的 JSON。')
+            hint='OpenAI 兼容目录通常为基础地址 + /models；基础地址已含 /v1 时，列表路径不要再填写 /v1/models。请核对“连接选项”中的目录协议和路径。'
+            raise providers.ProviderError(f'模型列表接口未返回 JSON（HTTP {status}，GET {request_path}）：{detail}{hint}') from None
         if not isinstance(value, dict):
             raise providers.ProviderError('模型列表响应应为 JSON 对象。')
         if value.get('error'):

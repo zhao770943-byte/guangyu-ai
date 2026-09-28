@@ -81,9 +81,9 @@ class Fixture(BaseHTTPRequestHandler):
                                       {'id': KEY}]})
         if parsed.path == '/error/models':
             return self.send({'error': {'message': 'denied ' + KEY}}, 401)
-        if parsed.path == '/html404/models':
+        if parsed.path in ('/html404/models','/html200/models'):
             raw = ('<html>Not Found ' + KEY + '</html>').encode()
-            self.send_response(404)
+            self.send_response(404 if parsed.path=='/html404/models' else 200)
             self.send_header('Content-Type', 'text/html')
             self.send_header('Content-Length', str(len(raw)))
             self.end_headers()
@@ -120,6 +120,14 @@ class Fixture(BaseHTTPRequestHandler):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_success_status_html_reports_requested_path_without_echoed_secret(self):
+        error=self.discover('/html200',status=502)['error']
+        self.assertIn('HTTP 200',error)
+        self.assertIn('GET /html200/models',error)
+        self.assertIn('HTML',error)
+        self.assertIn('/v1/models',error)
+        self.assertNotIn(KEY,error)
+
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(prefix='guangyu-discovery-')
