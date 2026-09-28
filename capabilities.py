@@ -52,6 +52,9 @@ def effective(provider):
         if 'image' in model:
             caps['aspect_ratio'] = True
             caps['resolution'] = model.startswith('gemini-3')
+    elif kind == 'video' and protocol == 'weijin_video':
+        import weijin_video
+        caps.update(aspect_ratio=True,reference_images=weijin_video.profile(provider).get('max_images',0)>0)
     elif kind == 'video' and protocol == 'openai_video':
         caps['first_frame'] = True
     elif kind == 'image' and protocol == 'minimax_image':
@@ -68,7 +71,7 @@ def mapped_controls(provider):
         return {'size': kind in ('image','video') and 'size' in used,
                 'seconds': kind == 'video' and 'seconds' in used}
     return {'size': protocol in ('openai_image','openai_video'),
-            'seconds': protocol == 'openai_video'}
+            'seconds': protocol in ('openai_video','weijin_video')}
 
 
 def validate_custom(custom):
@@ -99,8 +102,9 @@ def validate_job(provider, input_assets, parameters, size='auto'):
     if provider.get('protocol')=='gemini' and provider.get('kind')=='image' and size!='auto':
         raise ValueError('Gemini 图像接口不使用精确像素尺寸，请将尺寸设为自动，并使用宽高比和分辨率选项。请求尚未发送。')
     refs = input_assets.get('references', [])
-    if not isinstance(refs, list) or len(refs) > 8:
-        raise ValueError('最多选择 8 张参考图。')
+    limit=9 if provider.get('protocol')=='weijin_video' else 8
+    if not isinstance(refs, list) or len(refs) > limit:
+        raise ValueError(f'最多选择 {limit} 张参考图。')
     assets = {'references': refs, 'first_frame': input_assets.get('first_frame') or None,
               'last_frame': input_assets.get('last_frame') or None}
     if any(assets[k] is not None and not isinstance(assets[k],str) for k in ('first_frame','last_frame')):

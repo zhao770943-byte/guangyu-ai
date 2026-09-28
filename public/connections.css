@@ -48,3 +48,5 @@
 /* Hidden steps and optional confirmations must win over layout rules. */
 #provider-form [hidden]{display:none!important}
 #provider-dialog.fetching-models .connection-footer-left{display:flex}
+
+.connection-mapping-status,.connection-mapping-guide{padding:12px 14px;background:#fff8ea;border:1px solid #f0dfbc;border-radius:8px;color:#8b672a;font-size:12px;line-height:1.8}.connection-mapping-status{margin-top:16px}.connection-mapping-guide{margin-top:16px}.connection-mapping-guide p{color:inherit;margin:6px 0}.connection-mapping-guide ul{padding-left:20px;margin:8px 0 0}

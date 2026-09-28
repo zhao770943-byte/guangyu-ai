@@ -10,9 +10,15 @@ const context=vm.createContext({console,setTimeout,clearTimeout,
   FileReader:class {readAsDataURL(){this.result='data:image/png;base64,dGVzdA==';this.onload()}},
 });
 vm.runInContext(fs.readFileSync(path.join(root,'public/video-controls.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(root,'public/connections.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/image-controls.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
 async function run(){
+  assert.equal(vm.runInContext("connectionMappingIssues('weijin_video','video',{}).length",context),0);
+  assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{}).length",context),2);
+  assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{submit_path:'https://example.com/videos',media_path:'url'})[0].field",context),'submit_path');
+  assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{submit_path:'/videos',media_path:'url',poll_path:'/tasks/{id}'}).length",context),3);
+  assert.equal(vm.runInContext("connectionMappingIssues('custom','video',{submit_path:'/videos',media_path:'url'}).length",context),0);
   await vm.runInContext(`(async()=>{
     toast=()=>{};updateGenerate=()=>{};renderStudio=()=>{};
     api=async()=>({id:'first-fixture'});state.page='video';

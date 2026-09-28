@@ -31,6 +31,7 @@ def run_job(identity,resume=False):
         archive_status=('pending' if any(not a.get('local') for a in assets) else 'saved') if assets else None
         storage.update_job(identity,status='succeeded',result=result,error='',archive_status=archive_status,usage=result.get('usage',job.get('usage')),response_model=result.get('response_model'),response_id=result.get('response_id'),**timing())
         if archive_status=='pending':run_archive(identity,release=False)
+    except ValueError as ex:storage.update_job(identity,status='failed',error=providers.clean_error(str(ex),p),**timing())
     except providers.ProviderError as ex:storage.update_job(identity,status='interrupted' if ex.uncertain else 'failed',error=providers.clean_error(str(ex),p),error_code=ex.code,**timing())
     except Exception:storage.update_job(identity,status='failed',error='处理响应时发生错误。请核对协议、模型及字段映射；如平台已接受请求，请先核对用量。',**timing())
     finally:
@@ -99,6 +100,8 @@ def save_provider(body):
     if body.get('id') and not existing:raise ValueError('连接已不存在，请刷新后重试。')
     p={k:body.get(k) for k in ['name','kind','protocol','base_url','model']}
     p.update(id=identity,allow_local=body.get('allow_local') is True,extra=body.get('extra',{}),custom=body.get('custom',{}))
+    import weijin_video
+    p['video_model_metadata']=weijin_video.metadata(body.get('video_model_metadata',(existing or {}).get('video_model_metadata')))
     p['request_timeout_seconds']=body.get('request_timeout_seconds',(existing or {}).get('request_timeout_seconds'))
     p['platform']=model_catalog.validate_platform(body.get('platform',(existing or {}).get('platform','custom')))
     providers.validate(p)

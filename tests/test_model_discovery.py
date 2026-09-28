@@ -518,6 +518,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_platform_catalog_api_key_links_are_official_https_metadata(self):
         official_hosts = {
+            'weijin':'www.weijinapi.top',
             'openai': 'platform.openai.com',
             'anthropic': 'platform.claude.com',
             'gemini': 'aistudio.google.com',

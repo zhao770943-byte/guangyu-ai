@@ -2,7 +2,7 @@
 import base64, binascii, copy, json, re, socket, time
 import urllib.error, urllib.parse, urllib.request
 import storage, capabilities, uploads
-PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
+PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','weijin_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
 MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
@@ -133,6 +133,11 @@ def validate(p):
         if not isinstance(p.get(field),str) or not p[field].strip() or len(p[field])>maximum: raise ValueError(f'{field} 不能为空或过长。')
         p[field]=p[field].strip()
     validate_model_kind(p)
+    if p['protocol']=='weijin_video':
+        import weijin_video
+        if not weijin_video.destination(p):raise ValueError('维今视频协议的基础地址应为 https://www.weijinapi.top/v1。')
+        if not weijin_video.profile(p):raise ValueError('请重新获取此视频型号的能力信息。')
+        if p.get('extra'):raise ValueError('维今视频使用已适配参数，请清空附加 JSON 参数。')
     url=urllib.parse.urlsplit(p['base_url'])
     if not url.hostname or url.username or url.password or url.query or url.fragment: raise ValueError('基础地址需为完整 URL，不包含密钥、用户名、查询参数或片段。')
     try: _=url.port
@@ -152,9 +157,13 @@ def validate(p):
     if discovery_protocol=='custom':validate_custom_auth(custom)
     if p['protocol']=='custom':
         c=custom
-        validate_path(c.get('submit_path',''))
+        if not c.get('submit_path'):
+            raise ValueError('自定义接口尚未配置提交路径。获取模型列表只提供型号，不能确定生成接口；请在“高级参数与映射”按当前平台文档填写提交路径、请求模板和结果字段。')
+        try:validate_path(c['submit_path'])
+        except ValueError as ex:raise ValueError('提交路径：'+str(ex)) from ex
         if c.get('poll_path'):
-            validate_path(c['poll_path'],True)
+            try:validate_path(c['poll_path'],True)
+            except ValueError as ex:raise ValueError('轮询路径：'+str(ex)) from ex
             if '{id}' not in c['poll_path'] or not c.get('id_path') or not c.get('status_path'): raise ValueError('异步查询需填写任务 ID、状态路径和含 {id} 的轮询路径。')
             if not c.get('success_values'): raise ValueError('异步查询至少需要一个成功状态。')
         if not isinstance(c.get('body'),dict): raise ValueError('请求模板必须是 JSON 对象。')
@@ -331,6 +340,9 @@ def build(p,job):
         speed=params.get('speed',1)
         if protocol=='openai_speech':path,body='/audio/speech',{'model':model,'input':prompt,'voice':voice,'speed':speed,'response_format':'wav'}
         else:path,body='/t2a_v2',{'model':model,'text':prompt,'stream':False,'output_format':'url','voice_setting':{'voice_id':voice,'speed':speed,'vol':1,'pitch':0},'audio_setting':{'format':'mp3','sample_rate':32000,'bitrate':128000,'channel':1}}
+    elif protocol=='weijin_video':
+        import weijin_video
+        path,body='/videos',weijin_video.validate(p,job)
     elif protocol=='openai_video':
         path,body,multipart='/videos',{'model':model,'prompt':prompt,'seconds':str(job.get('seconds',4))},True
         if job.get('size')!='auto':body['size']=job['size']
@@ -483,7 +495,7 @@ def download_video(p,identity,job_id):
         if temp.exists():temp.unlink()
 def poll(p,job,initial=None):
     identity=str(job['upstream_id']);protocol=p['protocol']
-    if protocol=='openai_video':path,status_path,success,failure='/videos/'+urllib.parse.quote(identity,safe=''),'status',['completed'],['failed','cancelled']
+    if protocol in ('openai_video','weijin_video'):path,status_path,success,failure='/videos/'+urllib.parse.quote(identity,safe=''),'status',['completed'],['failed','cancelled']
     else:
         c=p['custom'];path=c['poll_path'].replace('{id}',urllib.parse.quote(identity,safe=''));status_path=c['status_path'];success,failure=c.get('success_values',[]),c.get('failure_values',[])
     deadline=time.monotonic()+POLL_TIMEOUT;response=initial;retries=0
@@ -502,13 +514,17 @@ def poll(p,job,initial=None):
         storage.update_job(job['id'],upstream_status=status[:80],progress=response.get('progress') if isinstance(response.get('progress'),(int,float)) else None)
         if status in failure:raise ProviderError('平台任务失败：'+clean_error(json.dumps(response.get('error') or response.get('message') or status,ensure_ascii=False),p))
         if status in success:
+            if protocol=='weijin_video':return {'text':'','assets':[{'type':'video','url':endpoint(p,path+'/content'),'local':False,'authenticated_content':True}],**metadata}
             if protocol=='openai_video':return {'text':'','assets':[download_video(p,identity,job['id'])],**metadata}
             return {**extract(p,response,job['id']),**metadata}
         if not status:raise ProviderError('查询响应缺少状态字段，请核对映射。平台任务 ID 已保存。')
-        time.sleep(POLL_SECONDS);response=None
+        time.sleep(10 if protocol=='weijin_video' else POLL_SECONDS);response=None
     raise ProviderError('已等待 30 分钟。平台任务 ID 已保存，请到平台核对结果，不要直接重复提交。')
 def execute(p,job,resume=False):
     if resume:return poll(p,job)
+    if p['protocol']=='weijin_video':
+        import weijin_video
+        return weijin_video.execute(p,job)
     path,body,multipart=build(p,job)
     if p['protocol']=='openai_speech':
         raw=request(p,path,body,binary=True)

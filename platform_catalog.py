@@ -6,6 +6,11 @@ Model names are never used to route a credential to a different platform.
 from copy import deepcopy
 
 PRESETS = [
+    {'id':'weijin','name':'维今 / ONE API','base_url':'https://www.weijinapi.top/v1',
+     'api_key_url':'https://www.weijinapi.top/','api_key_label':'获取 API Key',
+     'protocols':{'chat':'openai_chat','image':'openai_image','video':'weijin_video'},
+     'discovery_protocol':'openai','note':'视频使用维今 JSON 接口；时长和画幅按所选型号，目录可见不代表生成已验证。',
+     'docs_url':'https://www.weijinapi.top/docs/'},
     {'id': 'openai', 'name': 'OpenAI', 'base_url': 'https://api.openai.com/v1',
      'api_key_url': 'https://platform.openai.com/api-keys', 'api_key_label': '获取 API Key',
      'protocols': {'chat': 'openai_chat', 'image': 'openai_image', 'video': 'openai_video'},
@@ -86,6 +91,7 @@ PRESETS = [
 # Catalog types describe the vendor directory, not a claim of native protocol
 # compatibility. The actual returned model determines its adapter and subtype.
 CATALOG_TYPES={
+    "weijin":["chat","image","video"],
     'openai':['chat','audio','image','video'], 'anthropic':['chat'],
     'gemini':['chat','audio','image','video'], 'deepseek':['chat'],
     'siliconflow':['chat','audio','image','video'], 'openrouter':['chat','audio','image','video'],

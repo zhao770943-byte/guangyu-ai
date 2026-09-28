@@ -21,6 +21,10 @@ def sora_model(p):
 
 
 def options(p):
+    if p.get('protocol')=='weijin_video':
+        import weijin_video
+        info=weijin_video.profile(p)
+        return {'mode':'aspect','ratios':[{'value':r,'label':label,'sizes':{},'enabled':r in info.get('ratios',[])} for r,label,_ in RATIOS],'durations':info.get('durations_seconds',[]),'duration_enabled':True,'custom_duration':False,'custom_size':False,'sora':'','default_ratio':(info.get('ratios') or ['16:9'])[0],'fixed_resolution':info.get('resolution',''),'audio_note':'维今视频按目录能力提交；参考图为多图参考，不代表精确首尾帧。生成时参考图会上传到维今素材服务。'}
     c=capabilities.effective(p)
     mapped=capabilities.mapped_controls(p)
     sora=sora_model(p)
@@ -50,6 +54,11 @@ def validate(p,size,seconds):
     if p.get('kind')!='video':return
     if type(seconds) is not int or not 1<=seconds<=120:
         raise ValueError('视频时长应为 1–120 秒的整数。')
+    if p.get('protocol')=='weijin_video':
+        import weijin_video
+        info=weijin_video.profile(p)
+        if seconds not in info.get('durations_seconds',[]):raise ValueError('当前型号支持的时长为 '+ '、'.join(map(str,info.get('durations_seconds',[])))+' 秒。')
+        if size!='auto':raise ValueError('维今视频请使用画幅比例，像素尺寸保持自动。')
     sora=sora_model(p)
     if sora:
         if seconds not in (4,8,12,16,20):

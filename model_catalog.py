@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import weijin_video
 import platform_catalog
 import providers
 import storage
@@ -229,11 +230,14 @@ def _normalize(values, family, provider, key):
             kinds = [kind for kind in kinds if kind in selected.get('protocols', {})]
             if not kinds:
                 protocol = None
+        if weijin_video.destination(provider) and (weijin_video.metadata(item) or identity=='seedance2.5-9图'):
+            protocol='weijin_video';kinds=['video'];classified=['video']
         label = item.get('display_name', item.get('displayName', item.get('name', identity)))
         label = label if isinstance(label, str) and label.strip() else identity
         entry = {'id': identity, 'name': _redact(label, key, 240), 'supported_kinds': kinds,
                  'protocol': protocol, 'base_url': provider['base_url'],
                  'model_constraints': constraints, 'model_kinds':classified,'audio_task':providers.audio_task(identity)}
+        if protocol=='weijin_video':entry['video_model_metadata']=weijin_video.metadata(item) or weijin_video.profile({'model':identity})
         if isinstance(item.get('description'), str):
             entry['description'] = _redact(item['description'], key, 600)
         normalized.append(entry)

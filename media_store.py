@@ -58,7 +58,15 @@ def download(asset, job, index):
         for hop in range(6):
             conn,parsed=connection(url,job.get('provider_snapshot',{}))
             try:
-                conn.request('GET',parsed.path+('?' + parsed.query if parsed.query else '') or '/',headers={'Accept':'image/*,video/*,audio/*,application/octet-stream','User-Agent':'GuangyuAI-MediaStore'})
+                request_headers={'Accept':'image/*,video/*,audio/*,application/octet-stream','User-Agent':'GuangyuAI-MediaStore'}
+                provider=job.get('provider_snapshot',{})
+                if asset.get('authenticated_content') and provider.get('protocol')=='weijin_video' and hop==0:
+                    import providers
+                    from urllib.parse import quote
+                    expected=providers.endpoint(provider,'/videos/'+quote(str(job.get('upstream_id','')),safe='')+'/content')
+                    if url!=expected:raise SaveError('鉴权作品地址与原任务不匹配。')
+                    request_headers.update(providers.headers(provider))
+                conn.request('GET',parsed.path+('?' + parsed.query if parsed.query else '') or '/',headers=request_headers)
                 response=conn.getresponse()
                 if response.status in (301,302,303,307,308):
                     destination=response.getheader('Location')

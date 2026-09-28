@@ -15,16 +15,34 @@ function renderSettings(){
   document.querySelectorAll('[data-connection-filter]').forEach(button=>button.onclick=()=>{connectionView.filter=button.dataset.connectionFilter;renderSettings()});draw();
 }
 
+function connectionMappingIssues(protocol,kind,c){
+  if(protocol!=='custom')return [];
+  const issues=[];
+  const path=(key,label,required=false)=>{
+    const value=(c[key]||'').trim();
+    if(!value){if(required)issues.push({field:key,message:`请填写${label}（以 / 开头的相对路径，按当前平台文档填写）。`});return}
+    if(!value.startsWith('/')||value.startsWith('//'))issues.push({field:key,message:`${label}应以一个 / 开头，不要填写完整网址。`});
+  };
+  path('submit_path','提交路径',true);path('poll_path','轮询路径');
+  if(kind==='chat'&&!c.text_path?.trim())issues.push({field:'text_path',message:'请填写文本响应字段路径。'});
+  if(kind!=='chat'&&!c.media_path?.trim()&&!(kind==='image'&&c.base64_path?.trim()))issues.push({field:'media_path',message:'请填写媒体 URL 字段路径，用于读取生成结果。'});
+  if(c.poll_path?.trim()){
+    if(!c.poll_path.includes('{id}'))issues.push({field:'poll_path',message:'轮询路径需包含 {id}，用于查询原任务。'});
+    for(const [field,label] of [['id_path','任务 ID 字段'],['status_path','状态字段'],['success_values','成功状态']])if(!c[field]?.trim())issues.push({field,message:`异步查询需填写${label}。`});
+  }
+  return issues;
+}
+
 function connectionAdvancedHTML(p){
   const c=p?.custom||{};
-  return `<div class="connection-advanced-intro"><h3>高级参数与协议映射</h3><p>标准接口通常无需调整。自定义接口请按平台文档填写。</p></div>
+  return `<div class="connection-advanced-intro"><h3>高级参数与协议映射</h3><p>标准接口通常无需调整。自定义接口请按平台文档填写。</p><div id="connection-mapping-guide" class="connection-mapping-guide" hidden></div></div>
     <label>生成请求响应等待上限（秒）<input name="request_timeout_seconds" type="number" min="60" max="1800" step="1" value="${esc(p?.request_timeout_seconds??'')}" placeholder="留空：图像 600、视频 300、其他 150"></label><p class="field-hint">控制提交后的网络等待，可设 60–1800 秒。视频收到任务 ID 后继续后台查询；超时不会自动重复提交。</p>
     <label>附加请求参数（JSON）<textarea name="extra_json" rows="3" spellcheck="false">${esc(JSON.stringify(p?.extra||{},null,2))}</textarea></label>
     <div class="field-grid">${fieldHTML('discovery_path','模型列表路径',c.discovery_path||'',{placeholder:'/models'})}${fieldHTML('auth_header','自定义认证请求头',c.auth_header||'Authorization')}</div>
     ${fieldHTML('auth_prefix','自定义认证前缀',c.auth_prefix??'Bearer ')}<p class="field-hint">认证头与前缀用于自定义 JSON 协议。标准协议使用平台原生鉴权。</p>
-    <div id="connection-custom-fields">${fieldHTML('submit_path','提交路径',c.submit_path||'',{placeholder:'/generate'})}
+    <div id="connection-custom-fields">${fieldHTML('submit_path','提交路径',c.submit_path||'',{placeholder:'必填：平台文档中的提交路径，例如 /generate'})}
     <label>请求模板（JSON）<textarea name="body_template" rows="6" spellcheck="false">${esc(JSON.stringify(c.body||{model:'{{model}}',prompt:'{{prompt}}'},null,2))}</textarea></label>
-    <p class="field-hint">可使用 {{model}}、{{prompt}}、{{messages}}、{{first_frame}}、{{last_frame}}、{{reference_images}} 与高级参数变量。列表路径仅支持相对路径。</p>
+    <p class="field-hint">可使用 {{model}}、{{prompt}}、{{messages}}、{{first_frame}}、{{last_frame}}、{{reference_images}} 与高级参数变量。提交和轮询路径会追加到 API 基础地址后，不要填写完整网址或重复基础地址中的 /v1。字段路径如 data.0.url 不加斜杠。</p>
     <div class="section-label">模型能力 <small>需在模板中引用对应变量</small></div><div class="capability-grid">${Object.entries(capabilityNames).map(([key,label])=>`<label class="check-label"><input type="checkbox" name="cap_${key}" ${c.capabilities?.[key]?'checked':''}>${label}</label>`).join('')}</div>
     <div class="field-grid">${fieldHTML('text_path','文本响应路径',c.text_path||'',{placeholder:'choices.0.message.content'})}${fieldHTML('media_path','媒体 URL 路径',c.media_path||'',{placeholder:'data.0.url'})}</div>${fieldHTML('base64_path','图片 Base64 路径',c.base64_path||'',{placeholder:'data.0.b64_json'})}
     <div class="field-grid">${fieldHTML('id_path','任务 ID 路径',c.id_path||'',{placeholder:'id'})}${fieldHTML('status_path','状态路径',c.status_path||'',{placeholder:'status'})}</div>${fieldHTML('poll_path','轮询路径',c.poll_path||'',{placeholder:'/tasks/{id}'})}
@@ -59,7 +77,7 @@ async function editProvider(id,kind,{autoDiscover=false}={}){
   <aside class="connection-selection"><div class="connection-selection-title">连接预览</div><div id="connection-selected-summary"></div><div id="connection-selected-fields" hidden><label>连接名称<input name="name" maxlength="60" value="${esc(original?.name||'')}" placeholder="自动使用模型名称"></label>
   <div class="connection-fixed-type"><span>模型类型</span><strong id="connection-fixed-type-label"></strong><button type="button" class="text-button" id="connection-change-selected-type">更改</button></div><p id="connection-purpose-note" class="field-hint"></p><label class="check-label" id="connection-unknown-confirm" hidden><input type="checkbox" id="connection-confirm-kind">我已确认该型号支持所选类型</label>
   <details class="connection-protocol-options"><summary>协议与请求地址</summary><label>接口协议<select name="protocol"></select></label><code id="connection-request-url"></code></details></div>
-  <button type="button" class="connection-advanced-button" id="connection-open-advanced">${icon('sliders')} 高级参数与映射 ${icon('arrow')}</button><p class="connection-small-note">读取目录和保存连接不会提交生成任务。</p></aside></section>
+  <div id="connection-mapping-status" class="connection-mapping-status" role="status" hidden></div><button type="button" class="connection-advanced-button" id="connection-open-advanced">${icon('sliders')} 高级参数与映射 ${icon('arrow')}</button><p class="connection-small-note">读取目录和保存连接不会提交生成任务。</p></aside></section>
   <section id="connection-advanced-pane" class="connection-advanced-pane" hidden>${connectionAdvancedHTML(original)}</section></div>
   <div class="connection-error" id="connection-error" role="alert" hidden></div><div class="dialog-footer"><div class="connection-footer-left"><button type="button" id="connection-back" class="button secondary" hidden>上一步</button></div><span id="connection-footer-hint"></span><button type="submit" id="connection-primary" class="button primary">下一步</button></div></form>`;
   const wizard=setupConnectionWizard($('#provider-form'),original,platforms,defaultKind);dialog.showModal();if(autoDiscover)wizard.discover();
@@ -76,8 +94,10 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   const unavailable=m=>f('kind').value==='audio'&&['transcription','realtime','conversation'].includes(m?.audio_task);
   const officialModels=()=>platform()?.official_models?.filter(m=>kindsOf(m).includes(f('kind').value))||[];
   const discoveryProtocol=p=>['anthropic','gemini','custom'].includes(p)?p:'openai_chat';
+  function mappingIssues(){return connectionMappingIssues(f('protocol').value,f('kind').value,Object.fromEntries(['submit_path','poll_path','text_path','media_path','base64_path','id_path','status_path','success_values'].map(k=>[k,f(k).value])))}
+  function requireMapping(){const issues=mappingIssues();if(!issues.length)return true;advanced=true;advancedFrom=2;update();error('模型已选中，但生成接口尚未配置完整。'+issues[0].message);f(issues[0].field).focus();return false}
   function error(message=''){el('connection-error').hidden=!message;el('connection-error').textContent=message}
-  function endpoint(){const base=canonical(f('base_url').value),selected=f('model').value;el('connection-directory-preview').textContent=base?'模型目录请求：GET '+base+'/'+(f('discovery_path').value||'/models').replace(/^\//,''):'填写 API 基础地址后，将自动请求模型目录。';const suffix={openai_chat:'/chat/completions',openai_responses:'/responses',openai_image:'/images/generations',minimax_image:'/image_generation',openai_video:'/videos',openai_speech:'/audio/speech',minimax_speech:'/t2a_v2',anthropic:'/messages',gemini:'/models/'+encodeURIComponent(selected.replace(/^models\//,''))+':generateContent',custom:f('submit_path').value}[f('protocol').value];el('connection-request-url').textContent=base&&suffix?base+'/'+suffix.replace(/^\//,''):'按厂商文档配置提交路径';el('connection-custom-fields').hidden=f('protocol').value!=='custom'&&f('discovery_protocol').value!=='custom'}
+  function endpoint(){const base=canonical(f('base_url').value),selected=f('model').value;el('connection-directory-preview').textContent=base?'模型目录请求：GET '+base+'/'+(f('discovery_path').value||'/models').replace(/^\//,''):'填写 API 基础地址后，将自动请求模型目录。';const suffix={openai_chat:'/chat/completions',openai_responses:'/responses',openai_image:'/images/generations',minimax_image:'/image_generation',openai_video:'/videos',weijin_video:'/videos',openai_speech:'/audio/speech',minimax_speech:'/t2a_v2',anthropic:'/messages',gemini:'/models/'+encodeURIComponent(selected.replace(/^models\//,''))+':generateContent',custom:f('submit_path').value}[f('protocol').value];el('connection-request-url').textContent=base&&suffix?base+'/'+suffix.replace(/^\//,''):'按厂商文档配置提交路径';el('connection-custom-fields').hidden=f('protocol').value!=='custom'&&f('discovery_protocol').value!=='custom'}
   function protocols(value){f('protocol').innerHTML=(protocolOptions[f('kind').value]||[]).map(p=>`<option value="${p}" ${p===value?'selected':''}>${protocolNames[p]}</option>`).join('');endpoint()}
   function platformOptions(preferred){const available=platforms.filter(p=>p.model_types?.includes(f('kind').value)||p.id==='custom'||p.id===original?.platform);f('platform').innerHTML=available.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');if(available.some(p=>p.id===preferred))f('platform').value=preferred}
   function platformNote(){const selected=platform(),link=el('connection-api-key-link');el('connection-platform-access').hidden=!selected?.api_key_url;link.href=selected?.api_key_url||'#';link.innerHTML=esc(selected?.api_key_label||'获取 API Key')+' '+icon('arrow');el('connection-platform-access-note').textContent=selected?.allow_local?'尚未安装本机服务？':'还没有 API Key？';el('connection-key-note').textContent=original?.has_key&&canonical(original.base_url)===canonical(f('base_url').value)?'已保存，可留空复用':selected?.allow_local?'本机无鉴权可留空':'';el('connection-platform-hint').textContent=selected?.note||'填写服务商提供的 API 基础地址。';el('connection-scope-label').textContent=modelTypeLabels[f('kind').value]+'模型';el('connection-official-first').hidden=!officialModels().length;el('connection-official-models').hidden=!officialModels().length||catalogMode}
@@ -87,10 +107,13 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
     form.querySelectorAll('[data-wizard-step]').forEach(b=>{const n=Number(b.dataset.wizardStep);b.setAttribute('aria-current',n===step?'step':'false');b.disabled=saving||busy||(n>0&&!f('kind').value)||(n===2&&!loaded&&!model)});
     form.querySelectorAll('input,select,textarea').forEach(control=>control.disabled=saving);form.querySelectorAll('[name=model_choice]').forEach(control=>control.disabled=saving||unavailable(models.find(m=>m.id===control.value)));form.querySelectorAll('[data-model-type]').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.modelType===f('kind').value);b.disabled=saving});
     const validModel=model?.id&&purposeConfirmed&&allowed(model)&&!unavailable(model);
+    const issues=mappingIssues(),needsMapping=validModel&&issues.length>0;
+    const mappingStatus=el('connection-mapping-status');mappingStatus.hidden=!needsMapping;mappingStatus.textContent=needsMapping?'型号已获取，生成接口待配置。模型目录不会提供提交路径、查询方式和结果字段。':'';
+    const guide=el('connection-mapping-guide');guide.hidden=f('protocol').value!=='custom';guide.innerHTML='<strong>按当前平台的视频或生成接口文档配置</strong><p>同步接口需提交路径、请求模板、结果字段；异步接口还需任务 ID、轮询路径、状态字段。不能仅凭 Seedance 等型号名称确定路径。</p>'+(issues.length?'<ul>'+issues.map(x=>'<li>'+esc(x.message)+'</li>').join('')+'</ul>':'<p>必填项已填写，具体参数和字段仍需与平台文档核对。</p>');
     el('connection-primary').disabled=busy||saving||(!advanced&&(step===0?!f('kind').value:step===2?!validModel:false));
-    el('connection-primary').innerHTML=saving?'<span class="spinner"></span> 保存中':busy?'<span class="spinner"></span> 正在获取模型…':advanced?'完成配置':step===0?'下一步：选择厂商 '+icon('arrow'):step===1?icon('refresh')+' 一键获取模型':original?'保存修改':'接入所选模型';
+    el('connection-primary').innerHTML=saving?'<span class="spinner"></span> 保存中':busy?'<span class="spinner"></span> 正在获取模型…':advanced?'完成配置':step===0?'下一步：选择厂商 '+icon('arrow'):step===1?icon('refresh')+' 一键获取模型':needsMapping?'配置'+modelTypeLabels[f('kind').value]+'接口':original?'保存修改':'接入所选模型';
     el('connection-back').hidden=step===0&&!advanced;el('connection-back').textContent=advanced?'返回':'上一步';el('connection-back').disabled=saving||busy;
-    el('connection-footer-hint').textContent=advanced?'按厂商文档配置':step===0?'选择模型的用途':step===1?'自动读取，无需填写模型 ID':validModel?'将接入'+modelTypeLabels[f('kind').value]+'模型':'请选择匹配的型号';
+    el('connection-footer-hint').textContent=advanced?'按厂商文档配置':step===0?'选择模型的用途':step===1?'自动读取，无需填写模型 ID':needsMapping?'还需配置生成接口':validModel?'将接入'+modelTypeLabels[f('kind').value]+'模型':'请选择匹配的型号';
     el('connection-refresh').disabled=busy||saving;el('connection-refresh').innerHTML=busy?'<span class="spinner"></span> 获取中':icon('refresh')+' 一键获取模型';
     el('connection-model-heading').textContent='选择'+modelTypeLabels[f('kind').value]+'模型';el('connection-selected-fields').hidden=!model?.id;
     el('connection-selected-summary').innerHTML=model?.id?`<div class="connection-selected-icon">${icon(f('kind').value==='chat'?'assistant':f('kind').value)}</div><h3>${esc(model.id)}</h3><p>${esc(platform()?.name||'自定义厂商')}${model.source==='official_catalog'?' · 官方型号':''}</p>`:`<div class="connection-selection-empty">${icon('model')}<h3>选择一个${modelTypeLabels[f('kind').value]}型号</h3><p>只展示与所选类型匹配的模型。</p></div>`;
@@ -115,8 +138,9 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   function showOfficial(){if(!validConnection())return;revision++;busy=false;models=officialModels().map(m=>({...m}));loaded=true;catalogMode=true;model=null;purposeConfirmed=false;f('model').value='';el('connection-model-search').value='';step=2;advanced=false;error();update();drawModels()}
   async function save(){
     if(saving||busy||!model?.id||!purposeConfirmed||!allowed(model)||unavailable(model)||!validConnection())return;
+    if(!requireMapping())return;
     const name=f('name').value.trim();if(!name||name.length>60){error('请填写 1–60 字的连接名称。');return}
-    const payload={};['id','platform','kind','protocol','base_url','api_key'].forEach(k=>payload[k]=f(k).value);payload.name=name;payload.model=model.id;payload.allow_local=f('allow_local').checked;payload.request_timeout_seconds=f('request_timeout_seconds').value===''?null:Number(f('request_timeout_seconds').value);
+    const payload={};['id','platform','kind','protocol','base_url','api_key'].forEach(k=>payload[k]=f(k).value);payload.name=name;payload.model=model.id;payload.video_model_metadata=model.video_model_metadata||original?.video_model_metadata||{};payload.allow_local=f('allow_local').checked;payload.request_timeout_seconds=f('request_timeout_seconds').value===''?null:Number(f('request_timeout_seconds').value);
     try{payload.extra=JSON.parse(f('extra_json').value||'{}');payload.custom={body:JSON.parse(f('body_template').value||'{}'),usage_paths:JSON.parse(f('usage_paths').value||'{}')}}catch{advanced=true;advancedFrom=2;update();error('高级参数的 JSON 格式不正确。');return}
     ['submit_path','discovery_path','auth_header','auth_prefix','text_path','media_path','base64_path','id_path','status_path','poll_path','response_model_path','response_id_path'].forEach(k=>payload.custom[k]=f(k).value);['success_values','failure_values'].forEach(k=>payload.custom[k]=f(k).value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean));payload.custom.discovery_protocol=f('discovery_protocol').value;payload.custom.capabilities=Object.fromEntries(Object.keys(capabilityNames).map(k=>[k,f('cap_'+k).checked]));
     saving=true;error();update();try{const saved=await api('/api/providers/save',payload);state.providers=state.providers.filter(p=>p.id!==saved.id);state.providers.unshift(saved);state.selected[saved.kind]=saved.id;state.usage=null;if(current()){dialog.close();render();toast(modelTypeLabels[saved.kind]+'模型已接入')}else renderNavigation()}catch(err){if(current())error(err.message)}finally{saving=false;if(current())update()}
@@ -125,9 +149,9 @@ function setupConnectionWizard(form,original,platforms,defaultKind){
   form.querySelectorAll('[data-model-type]').forEach(b=>b.onclick=()=>{if(b.dataset.modelType===f('kind').value)return;const first=!f('kind').value,previous=f('platform').value;f('kind').value=b.dataset.modelType;platformOptions(first?'openai':previous);if(first||f('platform').value!==previous)resetPlatform();else{protocols(platform()?.protocols?.[f('kind').value]||'custom');invalidate()}update()});
   form.querySelectorAll('[data-wizard-step]').forEach(b=>b.onclick=()=>showStep(Number(b.dataset.wizardStep)));[el('connection-change-type'),el('connection-change-selected-type')].forEach(b=>b.onclick=()=>showStep(0));
   f('platform').onchange=resetPlatform;f('base_url').oninput=()=>invalidate({clearKey:true});f('api_key').oninput=()=>invalidate();f('allow_local').onchange=()=>invalidate();f('discovery_protocol').onchange=()=>invalidate();['discovery_path','auth_header','auth_prefix'].forEach(k=>f(k).oninput=()=>{revision++;busy=false;loaded=false;models=[];update()});
-  f('protocol').onchange=()=>{update();if(f('protocol').value==='custom'){advanced=true;advancedFrom=2;update()}};f('submit_path').oninput=endpoint;el('connection-model-search').oninput=drawModels;el('connection-show-unknown').onchange=drawModels;el('connection-confirm-kind').onchange=e=>{purposeConfirmed=e.target.checked;update()};
+  f('protocol').onchange=()=>{update();if(f('protocol').value==='custom'){advanced=true;advancedFrom=2;update()}};['submit_path','poll_path','text_path','media_path','base64_path','id_path','status_path','success_values'].forEach(k=>f(k).oninput=()=>{error();update()});el('connection-model-search').oninput=drawModels;el('connection-show-unknown').onchange=drawModels;el('connection-confirm-kind').onchange=e=>{purposeConfirmed=e.target.checked;update()};
   el('connection-key-toggle').onclick=()=>{const visible=f('api_key').type==='password';f('api_key').type=visible?'text':'password';el('connection-key-toggle').textContent=visible?'隐藏':'显示';el('connection-key-toggle').setAttribute('aria-label',visible?'隐藏密钥':'显示密钥')};
   el('connection-back').onclick=()=>{if(advanced){advanced=false;step=advancedFrom;update()}else showStep(Math.max(0,step-1))};el('connection-refresh').onclick=discover;[el('connection-official-first'),el('connection-official-models')].forEach(b=>b.onclick=showOfficial);[el('connection-open-advanced'),el('connection-network-advanced')].forEach(b=>b.onclick=()=>{advancedFrom=step;advanced=true;update()});
-  form.onsubmit=e=>{e.preventDefault();if(advanced){advanced=false;step=advancedFrom;update()}else if(step===0)showStep(1);else if(step===1)discover();else save()};dialog.addEventListener('close',()=>{revision++;f('api_key').value='';models=[]},{once:true});return {discover};
+  form.onsubmit=e=>{e.preventDefault();if(advanced){if(advancedFrom===2&&model&&!requireMapping())return;advanced=false;step=advancedFrom;error();update()}else if(step===0)showStep(1);else if(step===1)discover();else save()};dialog.addEventListener('close',()=>{revision++;f('api_key').value='';models=[]},{once:true});return {discover};
 }
 function closeProvider(){const input=$('#provider-form [name=api_key]');if(input)input.value='';$('#provider-dialog').close()}
