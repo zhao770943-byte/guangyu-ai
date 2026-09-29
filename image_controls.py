@@ -84,6 +84,8 @@ def options(provider):
 
 
 def validate_size(provider, size):
+    if size!='auto' and provider.get('protocol')=='openai_image' and provider.get('platform')=='xai':
+        raise ValueError('Grok 图像不使用 OpenAI 的像素尺寸字段，请保持模型默认尺寸。')
     if size == 'auto' or provider.get('protocol') != 'openai_image':
         return
     model = provider.get('model', '').lower()

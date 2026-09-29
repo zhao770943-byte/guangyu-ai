@@ -163,6 +163,10 @@ for item in PRESETS:
             for name in names]
 
 
+from catalog_extensions import extend
+extend(PRESETS)
+
+
 def get_preset(preset_id):
     return deepcopy(next((item for item in PRESETS if item['id'] == preset_id), None))
 

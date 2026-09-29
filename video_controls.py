@@ -21,6 +21,13 @@ def sora_model(p):
 
 
 def options(p):
+    if p.get('protocol')=='ark_video':
+        import ark_media
+        maximum=ark_media.max_duration(p.get('model'))
+        return {'mode':'aspect','ratios':[{'value':r,'label':label,'sizes':{},'enabled':r in ark_media.RATIOS} for r,label,_ in RATIOS],
+                'durations':[v for v in (4,5,6,8,10,12,15,20,25,30) if v<=maximum],
+                'duration_enabled':True,'custom_duration':False,'custom_size':False,'sora':'','default_ratio':'',
+                'audio_note':'方舟 Seedance：按所选型号提交时长；参考图与首尾帧为两种模式，不能混用。人物素材是否可用以平台审核为准。'}
     if p.get('protocol')=='comfy_h3':
         import comfy_h3
         return {'mode':'aspect','ratios':[{'value':r,'label':label,'sizes':{},'enabled':r in comfy_h3.SIZES} for r,label,_ in RATIOS],
@@ -51,7 +58,8 @@ def options(p):
         for ratio,label,size in RATIOS:
             w,h=map(int,size.split('x'))
             ratios.append({'value':ratio,'label':label,'sizes':{'720p':size,'1080p':f'{w*3//2}x{h*3//2}'},'enabled':mode!='none'})
-    return {'mode':mode,'ratios':ratios,'durations':[4,8,12,16,20] if sora else [4,5,6,8,10,12,15,20],
+    grok=p.get('platform')=='xai' and p.get('model')=='grok-imagine-video-1.5'
+    return {'mode':mode,'ratios':ratios,'durations':[4,8,12,16,20] if sora else [1,4,5,6,8,10,12,15] if grok else [4,5,6,8,10,12,15,20],
             'duration_enabled':mapped['seconds'],'custom_duration':not bool(sora),
             'custom_size':mode=='pixels','sora':sora,
             'audio_note':'声音与画面由 Sora 同步生成；此协议不提供独立声音开关，可在镜头描述中表达声音要求。' if sora else ''}
@@ -61,6 +69,11 @@ def validate(p,size,seconds):
     if p.get('kind')!='video':return
     if type(seconds) is not int or not 1<=seconds<=120:
         raise ValueError('视频时长应为 1–120 秒的整数。')
+    if p.get('platform')=='xai' and p.get('model')=='grok-imagine-video-1.5' and seconds>15:
+        raise ValueError('Grok Imagine Video 1.5 支持 1–15 秒。请求尚未发送。')
+    if p.get('protocol')=='ark_video':
+        import ark_media
+        if size!='auto' or not 4<=seconds<=ark_media.max_duration(p.get('model')):raise ValueError('Seedance 请使用自动像素尺寸和当前型号允许的时长。')
     if p.get('protocol')=='weijin_video':
         import weijin_video
         info=weijin_video.profile(p)

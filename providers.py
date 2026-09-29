@@ -2,7 +2,7 @@
 import base64, binascii, copy, json, re, socket, time
 import urllib.error, urllib.parse, urllib.request
 import storage, capabilities, uploads
-PROTOCOLS = {'image':{'openai_image','minimax_image','gemini','custom'},'video':{'openai_video','weijin_video','comfy_h3','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
+PROTOCOLS = {'image':{'openai_image','minimax_image','ark_image','gemini','custom'},'video':{'openai_video','weijin_video','comfy_h3','ark_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
 MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
@@ -89,8 +89,10 @@ def model_constraints(identity):
             kinds=['audio']
         elif re.match(r'^(?:gpt-image-|chatgpt-image-|dall-e-)\d',model) or model in ('image-01','image-01-live'):
             kinds=['image']
-        elif re.match(r'^sora-\d',model) or model=='minimax-h3-local-8gb':
+        elif re.match(r'^(?:seedance|doubao-seedance|kling|veo|hailuo|cogvideo|grok-imagine-video)(?:\d|[.-])',model) or re.match(r'^sora-\d',model) or model=='minimax-h3-local-8gb':
             kinds=['video']
+        elif re.match(r'^(?:nano[- ]?banana|banana|seedream|doubao-seedream|cogview|kolors|grok-imagine-image|flux)(?:\d|[ ._-]|$)',model):
+            kinds=['image']
         elif re.match(r'^gemini-\d[\w.-]*image(?:[.-]|$)',model):
             kinds=['image','chat']
         elif not any(part in model for part in ('image','video','imagine','flux','sdxl','stable-diffusion','cogvideo','embedding','embed-','rerank','whisper','audio','realtime','transcrib','tts','moderation')):
@@ -138,6 +140,10 @@ def validate(p):
     if p['protocol']=='comfy_h3':
         import comfy_h3
         comfy_h3.validate_connection(p)
+    if p['protocol'] in ('ark_image','ark_video'):
+        import ark_media
+        if not ark_media.supported(p['model'],p['kind']):raise ValueError('方舟协议与所选媒体型号不匹配。')
+        if p.get('extra'):raise ValueError('方舟媒体使用已适配参数，请清空附加 JSON 参数。')
     if p['protocol']=='weijin_video':
         import weijin_video
         if not weijin_video.destination(p):raise ValueError('维今视频协议的基础地址应为 https://www.weijinapi.top/v1。')
@@ -334,6 +340,9 @@ def build(p,job):
             for identity in inputs['references']:
                 record,raw=uploads.binary(identity)
                 body['contents'][-1]['parts'].append({'inlineData':{'mimeType':record['mime'],'data':base64.b64encode(raw).decode('ascii')}})
+    elif protocol in ('ark_image','ark_video'):
+        import ark_media
+        path,body,multipart=ark_media.build(p,job,inputs,params)
     elif protocol=='openai_image':
         path,body='/images/generations',{'model':model,'prompt':prompt}
         if job.get('size')!='auto':body['size']=job['size']
@@ -474,7 +483,7 @@ def extract(p,result,job_id):
                 if part.get('text'):text+=part['text']+'\n'
                 inline=part.get('inlineData') or part.get('inline_data')
                 if kind=='image' and inline and inline.get('data'):assets.append(save_image(inline['data'],job_id))
-    elif protocol=='openai_image':
+    elif protocol in ('openai_image','ark_image'):
         for item in result.get('data',[]):
             if item.get('b64_json'):assets.append(save_image(item['b64_json'],job_id))
             elif item.get('url'):assets.append(media_url(item['url'],'image'))
@@ -543,7 +552,11 @@ def execute(p,job,resume=False):
     if p['protocol']=='comfy_h3':
         import comfy_h3
         return comfy_h3.execute(p,job,resume)
-    if resume:return poll(p,job)
+    if resume:
+        if p['protocol']=='ark_video':
+            import ark_media
+            return poll(ark_media.polling_provider(p),job)
+        return poll(p,job)
     if p['protocol']=='weijin_video':
         import weijin_video
         return weijin_video.execute(p,job)
@@ -556,6 +569,12 @@ def execute(p,job,resume=False):
         if ex.response:record_response(p,job['id'],ex.response)
         raise
     metadata=record_response(p,job['id'],result)
+    if p['protocol']=='ark_video':
+        import ark_media
+        identity=result.get('id')
+        if not isinstance(identity,str) or not identity:raise ProviderError('方舟视频响应缺少任务 ID，请到平台核对；不要直接重复提交。',uncertain=True)
+        job=storage.update_job(job['id'],upstream_id=identity,status='polling')
+        return poll(ark_media.polling_provider(p),job)
     if p['protocol'].startswith('minimax_') and dig(result,'base_resp.status_code') not in (None,0):
         raise ProviderError('MiniMax 返回错误：'+clean_error(dig(result,'base_resp.status_msg') or '请求失败',p),response=result)
     if p['protocol']=='openai_video':

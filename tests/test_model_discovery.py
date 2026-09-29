@@ -531,6 +531,12 @@ class DiscoveryTests(unittest.TestCase):
     def test_platform_catalog_api_key_links_are_official_https_metadata(self):
         official_hosts = {
             'weijin':'www.weijinapi.top',
+            'tencent':'console.cloud.tencent.com','baidu':'console.bce.baidu.com','iflytek':'console.xfyun.cn',
+            'stepfun':'platform.stepfun.com','baichuan':'platform.baichuan-ai.com','yi':'platform.lingyiwanwu.com',
+            'cohere':'dashboard.cohere.com','bfl':'dashboard.bfl.ai','stability':'platform.stability.ai',
+            'runway':'dev.runwayml.com','luma':'lumalabs.ai','kling':'app.klingai.com',
+            'elevenlabs':'elevenlabs.io','recraft':'www.recraft.ai','ideogram':'ideogram.ai',
+            'meta':'build.nvidia.com','microsoft':'build.nvidia.com','ibm':'build.nvidia.com',
             'openai': 'platform.openai.com',
             'anthropic': 'platform.claude.com',
             'gemini': 'aistudio.google.com',
@@ -567,7 +573,7 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertFalse(link.fragment)
                 self.assertTrue(link.path.startswith('/'))
                 self.assertEqual(item['api_key_label'],
-                                 '下载本机服务' if identity in ('ollama', 'lmstudio') else '获取 API Key')
+                                 '下载本机服务' if identity in ('ollama', 'lmstudio') else '获取 NVIDIA API Key' if identity in ('meta','microsoft','ibm') else '获取 API Key')
         self.assertFalse(catalog['custom'].get('api_key_url'))
         self.assertFalse(catalog['custom'].get('api_key_label'))
         self.assertFalse(CALLS)
@@ -585,7 +591,9 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_catalog_output_types_and_adapter_metadata(self):
         catalog={p['id']:p for p in self.api('/api/platforms')['platforms']}
-        self.assertEqual(len(catalog),25)
+        self.assertEqual(len(catalog),43)
+        self.assertNotIn('video',catalog['openai']['model_types'])
+        self.assertNotIn('audio',catalog['ark']['model_types'])
         self.assertEqual(catalog['comfy_h3']['model_types'],['video'])
         for identity in ('anthropic','deepseek','moonshot','cerebras','sambanova','nvidia'):
             self.assertEqual(catalog[identity]['model_types'],['chat'])

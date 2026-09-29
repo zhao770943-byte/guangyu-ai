@@ -52,6 +52,10 @@ def effective(provider):
         if 'image' in model:
             caps['aspect_ratio'] = True
             caps['resolution'] = model.startswith('gemini-3')
+    elif kind == 'image' and protocol == 'ark_image':
+        caps['reference_images']=True
+    elif kind == 'video' and protocol == 'ark_video':
+        caps.update(first_frame=True,last_frame=True,reference_images=True,aspect_ratio=True,seed=True,audio=True)
     elif kind == 'video' and protocol == 'comfy_h3':
         caps.update(first_frame=True,last_frame=True,aspect_ratio=True,seed=True,resolution=True)
     elif kind == 'video' and protocol == 'weijin_video':
@@ -68,12 +72,14 @@ def effective(provider):
 
 def mapped_controls(provider):
     kind, protocol = provider.get('kind'), provider.get('protocol')
+    if protocol=='openai_image' and provider.get('platform')=='xai':
+        return {'size':False,'seconds':False}
     if protocol == 'custom':
         used = template_variables(request_template(provider))
         return {'size': kind in ('image','video') and 'size' in used,
                 'seconds': kind == 'video' and 'seconds' in used}
     return {'size': protocol in ('openai_image','openai_video'),
-            'seconds': protocol in ('openai_video','weijin_video','comfy_h3')}
+            'seconds': protocol in ('openai_video','weijin_video','comfy_h3','ark_video')}
 
 
 def validate_custom(custom):

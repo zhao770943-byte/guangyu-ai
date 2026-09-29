@@ -8,6 +8,10 @@
 
 ![光屿 AI 图像工作台](docs/images/studio.jpg)
 
+## 主分支模型目录升级
+
+当前源码提供 43 个接入选项，文本 33、音频 16、图像 21、视频 14 个入口（各类型不含自定义，包含托管平台与本地服务）。支持按厂商或模型系列搜索、分模态填写地址、官方型号直接选择；新增 Seedream / Seedance 原生媒体适配，以及 Grok 视频和 Photon 生图映射。详细范围与尚待适配的专用接口见 [厂商与型号清单](docs/provider-selection.md)。已有安装包以对应 Release 说明为准，主分支更新不会自动替换旧 EXE。
+
 ## Windows 一键使用
 
 1. 打开 [Releases](https://github.com/zhao770943-byte/guangyu-ai/releases)，下载对应版本的 `GuangyuAI-v版本号-windows-x64.zip`。请下载这个应用包，GitHub 自动生成的 `Source code` 是开发源码。

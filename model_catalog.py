@@ -71,7 +71,7 @@ def prepare(body):
     allow_local = body.get('allow_local') is True
     if 'allow_local' not in body:
         allow_local = (selected.get('allow_local', False) if platform_changed else old.get('allow_local', selected.get('allow_local', False))) is True
-    preferred_base = selected.get('base_url')
+    preferred_base = selected.get('profiles',{}).get(kind,{}).get('base_url') or selected.get('base_url')
     base_url = body.get('base_url') or (preferred_base if platform_changed else old.get('base_url')) or preferred_base
     base_url = providers.validate_base_url(base_url, allow_local)
     key = body.get('api_key', '')
@@ -166,6 +166,17 @@ def _suggestions(identity, item, family, provider):
     """Conservative protocol hints; never trust returned endpoint URLs."""
     model = identity.lower().removeprefix('models/')
     if providers.audio_task(identity) and family in ('gemini','anthropic'):return ['audio'],None
+    selected=preset(provider.get('platform')) or {}
+    # Only local, reviewed catalog entries can select native adapters.
+    known=next((m for m in selected.get('official_models',[]) if m['id']==identity.removeprefix('models/')),None)
+    if known:return known['model_kinds'],known['protocol']
+    leaf=model.rsplit('/',1)[-1]
+    if provider.get('platform')=='ark':
+        import ark_media
+        for kind in ('image','video'):
+            if ark_media.supported(leaf,kind):return [kind],'ark_'+kind
+    if provider.get('platform')=='xai' and leaf.startswith('grok-imagine-image'):return ['image'],'openai_image'
+    if provider.get('platform')=='zhipu' and leaf.startswith('cogview-'):return ['image'],'openai_image'
     if family == 'anthropic':
         return ['chat'], 'anthropic'
     if family == 'gemini':
@@ -192,7 +203,7 @@ def _suggestions(identity, item, family, provider):
     if any(part in leaf for part in ('embedding', 'embed-', 'rerank', 'whisper', 'audio', 'realtime', 'transcrib', 'tts', 'moderation')):
         return [], None
     if providers.model_constraints(identity)['kinds']==['chat'] or leaf.startswith(('gpt-', 'chatgpt-', 'claude-', 'deepseek-', 'qwen', 'moonshot-', 'kimi-', 'grok-',
-                        'glm-', 'minimax-', 'llama-', 'mistral-', 'open-mistral-', 'mixtral-', 'open-mixtral-', 'pixtral-', 'ministral-', 'magistral-', 'codestral-', 'devstral-', 'gemma-', 'nemotron-', 'gemini-')) or re.match(r'^o[1-9](?:-|$)', leaf):
+                        'glm-', 'minimax-', 'llama-', 'mistral-', 'open-mistral-', 'mixtral-', 'open-mixtral-', 'pixtral-', 'ministral-', 'magistral-', 'codestral-', 'devstral-', 'gemma-', 'nemotron-', 'gemini-', 'hunyuan-', 'ernie-', 'spark-', 'step-', 'baichuan', 'yi-', 'command-', 'aya-', 'jamba-', 'phi-', 'granite-', 'doubao-seed-')) or re.match(r'^o[1-9](?:-|$)', leaf):
         protocol = 'openai_responses' if provider['protocol'] == 'openai_responses' or 'codex' in leaf else 'openai_chat'
         return ['chat'], protocol
     return [], None
@@ -246,17 +257,23 @@ def _normalize(values, family, provider, key):
                 protocol = None
         if weijin_video.destination(provider) and (weijin_video.metadata(item) or identity=='seedance2.5-9图'):
             protocol='weijin_video';kinds=['video'];classified=['video']
+        known=next((m for m in selected.get('official_models',[]) if m['id']==identity.removeprefix('models/')),None)
         label = item.get('display_name', item.get('displayName', item.get('name', identity)))
         label = label if isinstance(label, str) and label.strip() else identity
         entry = {'id': identity, 'name': _redact(label, key, 240), 'supported_kinds': kinds,
                  'protocol': protocol, 'base_url': provider['base_url'],
                  'model_constraints': constraints, 'model_kinds':classified,'audio_task':{'text-to-speech':'speech','speech-to-text':'transcription','transcription':'transcription'}.get(catalog_task,providers.audio_task(identity))}
+        if known:
+            entry['name']=known['name']
+            if known.get('custom'):entry['custom']=known['custom']
         if protocol=='weijin_video':entry['video_model_metadata']=weijin_video.metadata(item) or weijin_video.profile({'model':identity})
         if isinstance(item.get('description'), str):
             entry['description'] = _redact(item['description'], key, 600)
         normalized.append(entry)
     if values and not normalized:
         raise providers.ProviderError('模型列表没有有效的模型 ID，请核对返回格式。')
+    prefix=selected.get('model_prefix')
+    if prefix:normalized=[m for m in normalized if m['id'].lower().startswith(prefix)]
     return normalized, malformed
 
 
