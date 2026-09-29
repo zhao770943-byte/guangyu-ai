@@ -54,7 +54,7 @@ def launch_command():
 
 def main(args=None):
     args = list(sys.argv[1:] if args is None else args)
-    unknown = set(args) - {'--stop', '--no-browser'}
+    unknown = set(args) - {'--stop', '--no-browser', '--supervised'}
     if unknown:
         raise RuntimeError('不支持的启动参数：' + ', '.join(sorted(unknown)))
     port, origin, data = configuration()
@@ -70,6 +70,8 @@ def main(args=None):
         raise RuntimeError(f'端口 {port} 已运行另一个版本或数据目录的光屿 AI。请先通过原程序安全停止它，或设置 GUANGYU_PORT 使用其他端口。')
     if '--stop' in args:
         if not running:
+            data.mkdir(parents=True,exist_ok=True)
+            (data/'service.paused').write_text('User requested stop\n',encoding='utf-8')
             print('此数据目录的光屿 AI 当前未运行。')
             return 0
         token = read(opener, origin, '/api/bootstrap')['csrf']
@@ -96,6 +98,10 @@ def main(args=None):
             raise RuntimeError('已提交关闭请求，服务仍在退出，请稍后检查。')
         print('光屿 AI 已关闭。数据和密钥仍保存在本机。')
         return 0
+    if '--supervised' in args:
+        if (data/'service.paused').exists():return 0
+    else:
+        (data/'service.paused').unlink(missing_ok=True)
     if not running:
         with socket.socket() as sock:
             sock.settimeout(1)

@@ -33,6 +33,9 @@ def main(args=None):
         # Set this before importing storage/server, which resolve their paths once.
         os.environ['GUANGYU_DATA'] = str(data)
         handle = install_logging(data)
+        if '--watchdog' in args:
+            import watchdog
+            return watchdog.main([arg for arg in args if arg!='--watchdog'])
         if '--serve' in args:
             if set(args) - {'--serve', '--no-browser'}:
                 raise RuntimeError('服务启动参数无效。')

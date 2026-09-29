@@ -74,3 +74,22 @@ node tests/test_library_picker.js
 该检查使用独立副本、本机模拟服务与测试数据；运行 EXE 时不依赖 PATH 中的 Python。它不会验证真实平台额度或完整 Windows 兼容性。
 
 便携版包含 Python 和第三方运行依赖；分发时保留相关许可。当前构建不包含代码签名，SHA-256 用于核对文件一致性。
+
+
+## Windows 常驻运行
+
+不要将日常服务留在开发工具的临时执行会话中。源码版使用 Windows 任务计划程序启动独立的 `watchdog.py`，同一个 Windows 用户登录后自动运行。安装示例（填写已安装 requirements.txt 的 Python 路径）：
+
+```powershell
+.\scripts\install_autostart.ps1 -InstallRoot 'C:\Apps\GuangyuAI' -Python 'C:\Apps\GuangyuAI\.venv\Scripts\python.exe'
+```
+
+新构建的便携版附带 `开启常驻服务.ps1`，会调用该目录的 `GuangyuAI.exe --watchdog --no-browser --keep-awake-ac`。此脚本不适用于尚未加入守护入口的旧 EXE。
+
+任务 `GuangyuAI-Local-Watchdog` 使用当前用户的交互式登录凭据，无需保存密码，保留 DPAPI 密钥的用户归属。每 10 秒检查服务身份，仅通过已有的安全启动器恢复本安装，不结束其他占用端口的程序、不重新提交生成请求。任务无运行时长上限；守护自身异常退出后，任务计划程序每分钟重试，最多 999 次。互斥锁和任务设置避免重复守护。
+
+守护健康服务时通过线程电源请求阻止接通电源下的自动睡眠，允许屏幕熄灭；使用电池时遵循系统省电设置，不修改全局电源方案。锁屏可以运行，关机、注销或主动休眠不能提供服务；登录触发已配置不等于已完成重启验收。
+
+`停止光屿AI.cmd` 安全停止后写入 `data/service.paused`，守护保持暂停；正常启动器再次启动时解除暂停。`data/watchdog.log` 记录启动与恢复，`data/watchdog-status.json` 记录当前状态、心跳和接通电源防睡眠请求结果。日志自动轮转。
+
+取消常驻使用 `install_autostart.ps1 -Disable`（便携版使用 `开启常驻服务.ps1 -Disable`）。之后仍可正常手动启动。常驻守护不保证机器断电、系统崩溃、磁盘故障或异常端口占用时的可用性。

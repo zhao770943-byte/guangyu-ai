@@ -277,6 +277,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/shutdown':
                 with ACTIVE_LOCK:
                     if ACTIVE:raise ValueError('仍有生成或作品保存任务正在运行，请等待完成后再关闭。')
+                    (storage.DATA/'service.paused').write_text('User requested stop\n',encoding='utf-8')
                     self.json_response({'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             return self.json_response({'error':'接口不存在。'},404)
         except (ValueError,TypeError) as ex:return self.json_response({'error':str(ex)[:1000]},400)

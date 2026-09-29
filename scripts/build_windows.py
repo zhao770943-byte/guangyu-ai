@@ -60,6 +60,7 @@ def build():
         '--paths', str(ROOT), str(ROOT / 'desktop.py'),
     ], cwd=ROOT, check=True)
     bundle = DIST / 'GuangyuAI'
+    shutil.copy2(ROOT / 'scripts' / 'install_autostart.ps1', bundle / '开启常驻服务.ps1')
     # Explicit distribution allowlist: only application files and public documentation.
     for name in ('LICENSE', 'README.md', '使用说明.md', '设计与接入方案.md', '验收记录.md',
                  'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'VERSION'):
