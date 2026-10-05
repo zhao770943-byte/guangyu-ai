@@ -1,0 +1,27 @@
+// Render and payload regression: acting directions must remain separate from text.
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const root=path.resolve(__dirname,'..'),elements={};
+for(const id of ['page','model-select','prompt','prompt-count','audio-voice','audio-instructions','generation-form'])elements['#'+id]={};
+const context=vm.createContext({console,setTimeout,clearTimeout,document:{querySelector:s=>elements[s],querySelectorAll:()=>[],addEventListener(){}}});
+vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
+vm.runInContext(fs.readFileSync(path.join(root,'public/audio.js'),'utf8'),context);
+vm.runInContext(`heading=()=>'';section=(title,n,body)=>body;updateResult=()=>{};updateGenerate=()=>{};state.providers=[{id:'qwen',kind:'audio',name:'Qwen',model:'qwen3-tts-instruct-flash',protocol:'qwen_speech',capabilities:{voice:true,instructions:true}}];state.drafts.audio.prompt='我相信你。';state.drafts.audio.parameters={voice:'Serena',instructions:'轻声安慰'};renderAudio();`,context);
+assert.match(elements['#page'].innerHTML,/audio-instructions/);
+assert.doesNotMatch(elements['#page'].innerHTML,/id="audio-speed"/);
+const payload=vm.runInContext("payloadFor('audio')",context);
+assert.equal(payload.prompt,'我相信你。');assert.equal(payload.parameters.instructions,'轻声安慰');
+elements['#model-select'].onchange({target:{value:'qwen'}});
+assert.equal(vm.runInContext('state.drafts.audio.parameters.instructions',context),undefined);
+vm.runInContext(`state.providers=[{id:'clone',kind:'audio',name:'薰儿 · 复刻候选',model:'qwen3-tts-vc-2026-01-22',protocol:'qwen_speech',extra:{voice:'qwen-tts-vc-fixture'},capabilities:{voice:true}}];state.selected.audio='clone';state.drafts.audio.parameters={};renderAudio();`,context);
+assert.match(elements['#page'].innerHTML,/qwen-tts-vc-fixture/);
+assert.doesNotMatch(elements['#page'].innerHTML,/<option value="Serena"/);
+assert.doesNotMatch(elements['#page'].innerHTML,/id="audio-instructions"/);
+assert.equal(vm.runInContext("payloadFor('audio').parameters.voice",context),'qwen-tts-vc-fixture');
+vm.runInContext(`state.providers=[{id:'cosy',kind:'audio',name:'薰儿 · 固定声线',model:'cosyvoice-v3.5-plus',protocol:'cosyvoice_speech',extra:{voice:'cosyvoice-v3.5-plus-vd-fixture'},capabilities:{voice:true,instructions:true,speed:true}}];state.selected.audio='cosy';state.drafts.audio.parameters={instructions:'轻声安慰'};renderAudio();`,context);
+assert.match(elements['#page'].innerHTML,/cosyvoice-v3.5-plus-vd-fixture/);
+assert.match(elements['#page'].innerHTML,/id="audio-instructions" maxlength="100"/);
+assert.doesNotMatch(elements['#page'].innerHTML,/<option value="Serena"/);
+const cosyPayload=vm.runInContext("payloadFor('audio')",context);
+assert.equal(cosyPayload.parameters.voice,'cosyvoice-v3.5-plus-vd-fixture');
+assert.equal(cosyPayload.parameters.instructions,'轻声安慰');assert.equal(cosyPayload.prompt,'我相信你。');
+console.log('Audio instruction UI and payload checks passed.');

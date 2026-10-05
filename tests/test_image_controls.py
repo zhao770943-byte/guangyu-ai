@@ -24,6 +24,16 @@ def job(size='auto', **parameters):
 
 
 class ImageControlsTests(unittest.TestCase):
+    def test_weijin_new_alias_does_not_inherit_unverified_pixel_sizes(self):
+        p=provider('gpt-image-2.5-sunburst新', base_url='https://www.weijinapi.top/v1')
+        self.assertEqual(image_controls.options(p)['mode'], 'custom')
+        self.assertEqual(image_controls.options(p)['ratios'], [])
+        self.assertEqual(image_controls.options(p)['sizes'], [])
+        self.assertNotIn('size', providers.build(p, job())[1])
+        with self.assertRaises(ValueError):image_controls.validate_size(p, '1536x864')
+        p['base_url']='https://example.com/v1'
+        self.assertEqual(image_controls.options(p)['mode'], 'pixels')
+
     def test_canvas_script_is_served_by_the_local_server(self):
         app = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         origin = f'http://127.0.0.1:{app.server_port}'

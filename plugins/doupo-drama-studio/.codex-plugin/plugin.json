@@ -1,0 +1,35 @@
+{
+  "name": "doupo-drama-studio",
+  "version": "1.0.0",
+  "description": "基于光屿第一集制作复盘的斗破苍穹连续漫剧制作与工作台实现技能。",
+  "author": {
+    "name": "Guangyu Studio"
+  },
+  "skills": "./skills/",
+  "keywords": [
+    "斗破苍穹",
+    "光屿",
+    "漫剧",
+    "连续性",
+    "分镜",
+    "配音"
+  ],
+  "interface": {
+    "displayName": "光屿 · 斗破漫剧",
+    "shortDescription": "从定稿、分镜到声音和交付，延续第一集的制作经验",
+    "longDescription": "提供连续漫剧制作 Skill 与光屿工作台实现 Skill。读取项目现状，按当前版本审图，检查动作、剧情、配音与混音，只修复有问题的环节。附只读项目检查脚本。",
+    "developerName": "Guangyu Studio",
+    "category": "Productivity",
+    "capabilities": [
+      "Production workflow",
+      "Project review"
+    ],
+    "defaultPrompt": [
+      "使用 $doupo-production 继续下一集，先读取当前项目并列出待修问题。",
+      "使用 $guangyu-workbench 升级光屿工作台，保留已接受作品与运行数据。"
+    ],
+    "brandColor": "#C4944B",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg"
+  }
+}

@@ -4,16 +4,25 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 import hashlib, json, mimetypes, os, re, secrets, sys, threading, time
-import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library, storyboards
+# Portable source installs can carry their verified media wheels locally.
+sys.path.insert(0, str(Path(__file__).resolve().parent / '_vendor'))
+import creative_workspace
+import novel_studio
+import ai_control
+import project_manager
+import visual_film, film_plan, film_queue, film_compose
+import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library, storyboards, visual_studio
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '2.3.2'
+VERSION = '3.2.0'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)
 POOL = ThreadPoolExecutor(max_workers=3,thread_name_prefix='generation')
 ACTIVE, ACTIVE_LOCK = set(), threading.RLock()
 STATUS_ACTIVE = {'queued','submitting','polling'}
+FILM_STOP = threading.Event()
+COMPOSE_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix='film-compose')
 
 def run_job(identity,resume=False):
     job=storage.get('jobs',identity);p=job['provider_snapshot']
@@ -60,11 +69,44 @@ def dispatch_archive(job):
         ACTIVE.add(job['id']);POOL.submit(run_archive,job['id'])
         return job
 
+def run_film_composition(identity):
+    started = time.monotonic()
+    try:
+        result = film_compose.compose(storage.get('jobs', identity))
+        storage.update_job(identity, status='succeeded', film_phase='done', result=result, archive_status='saved', error='', finished_at=storage.now(), elapsed_ms=round((time.monotonic()-started)*1000))
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, ValueError) else '本机合成失败，请检查片段文件及磁盘空间后重试。'
+        storage.update_job(identity, status='interrupted', film_phase='compose_failed', error=message + ' 原片段已保留，重试合成不会重新生成。')
+    finally:
+        with ACTIVE_LOCK:
+            ACTIVE.discard(identity)
+
+
+def dispatch_film_composition(job):
+    with ACTIVE_LOCK:
+        ACTIVE.add(job['id'])
+        COMPOSE_POOL.submit(run_film_composition, job['id'])
+
+
+def film_monitor():
+    while not FILM_STOP.wait(1):
+        try:
+            film_queue.tick(dispatch, dispatch_film_composition, ACTIVE, ACTIVE_LOCK)
+            novel_studio.tick(create_job, dispatch, ACTIVE, ACTIVE_LOCK)
+        except Exception:
+            # Keep the durable claims intact; another tick can inspect their state.
+            print('Film scheduler paused this tick; durable jobs retained.', flush=True)
+
+
 def recover():
     for job in storage.items('jobs',10000):
         if job.get('work_deleted_at'):
             if job.get('work_cleanup_pending'):work_library.cleanup(job)
             continue
+        if job.get('film_batch'):
+            if job.get('film_phase') == 'composing':storage.update_job(job['id'], film_phase='generating')
+            continue
+        if job.get('film_dispatch_state') == 'waiting':continue
         if job['status']=='polling' and job.get('upstream_id'):dispatch(job,resume=True)
         elif job['status'] in STATUS_ACTIVE:storage.update_job(job['id'],status='interrupted',finished_at=storage.now(),error='上次运行被中断。未自动重新提交，以免重复计费；请先在平台核对任务。')
         elif job['status']=='succeeded' and job.get('result',{}).get('assets') and job.get('archive_status') in (None,'pending'):
@@ -109,6 +151,13 @@ def save_provider(body):
     if not isinstance(key,str) or len(key)>8000 or any(ord(c)<32 for c in key):raise ValueError('API Key 格式无效。')
     same_destination=existing and providers.canonical_base_url(existing['base_url'])==providers.canonical_base_url(p['base_url'])
     p['secret']=storage.crypt(key.strip()) if key.strip() else ((existing or {}).get('secret','') if same_destination else '')
+    if not key.strip() and not existing and body.get('credential_source_id'):
+        source_id=body['credential_source_id']
+        if not isinstance(source_id,str) or not re.fullmatch(r'[a-f0-9]{32}',source_id):raise ValueError('凭据来源无效。')
+        source=storage.get('providers',source_id)
+        if not source:raise ValueError('原厂商连接已删除，请重新选择。')
+        if providers.canonical_base_url(source['base_url'])!=providers.canonical_base_url(p['base_url']):raise ValueError('地址已变更，请重新填写 API Key；不会复用其他地址的密钥。')
+        p['secret']=source.get('secret','')
     storage.put('providers',p)
     return storage.public_provider(p)
 
@@ -123,11 +172,13 @@ def create_job(body, *, prepare_only=False):
     import video_controls
     video_controls.validate(p,size,seconds)
     input_assets,parameters,caps=capabilities.validate_job(p,body.get('input_assets'),body.get('parameters'),size)
+    collection_id=creative_workspace.collection(body.get('collection_id',''))
     context=assistant_context(body.get('assistant_context')) if p['kind']=='chat' else None
     with ACTIVE_LOCK,storage.LOCK:
         if len(ACTIVE)>=12:raise ValueError('当前任务较多，请等待已有任务结束。')
         job={'id':storage.uid(),'kind':p['kind'],'provider_id':p['id'],'provider_name':p['name'],'model':p['model'],'provider_snapshot':p,'prompt':prompt,'size':size,'seconds':seconds,'created_at':storage.now(),'updated_at':storage.now(),'status':'queued','result':{'text':'','assets':[]},'error':'','upstream_id':''}
         job.update(input_assets=input_assets,parameters=parameters,capabilities_snapshot=caps,mapped_controls_snapshot=capabilities.mapped_controls(p),request_timeout_seconds=providers.request_timeout(p),usage=providers.normalize_usage(p,{}),started_at=None,finished_at=None,elapsed_ms=None,response_model=None,response_id=None)
+        if collection_id:job['collection_id']=collection_id
         conv=None
         if p['kind']=='chat':
             conv_id=body.get('conversation_id');conv=storage.get('conversations',conv_id) if conv_id else None
@@ -174,6 +225,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path=urlsplit(self.path).path
             if path=='/api/bootstrap':return self.json_response({'csrf':CSRF,'providers':[storage.public_provider(p) for p in storage.items('providers')],'jobs':[storage.public_job(j) for j in storage.items('jobs',-1)],'conversations':storage.items('conversations'),'version':VERSION})
+            if path=='/api/projects':return self.json_response(project_manager.listing())
+            if path=='/api/ai-control':return self.json_response(ai_control.dashboard())
+            if path=='/api/workspace':return self.json_response(creative_workspace.listing())
+            if path=='/api/novels':
+                identity=parse_qs(urlsplit(self.path).query).get('id',[''])[0]
+                return self.json_response(novel_studio.public(novel_studio.require(identity)) if identity else {'projects':novel_studio.listing()})
             if path=='/api/platforms':
                 import platform_catalog
                 return self.json_response({'platforms':platform_catalog.list_presets()})
@@ -184,6 +241,9 @@ class Handler(BaseHTTPRequestHandler):
                 if csv_requested:
                     raw=usage.csv_export(report).encode('utf-8');self.send_headers(200,'text/csv; charset=utf-8',len(raw),{'Content-Disposition':'attachment; filename="guangyu-usage.csv"'});self.wfile.write(raw);return
                 return self.json_response(report)
+            if path=='/api/visual-projects':
+                identity=parse_qs(urlsplit(self.path).query).get('id',[''])[0]
+                return self.json_response(visual_studio.public(visual_studio.require(identity)) if identity else {'projects':visual_studio.list_projects()})
             if path=='/api/storyboards':
                 identity=parse_qs(urlsplit(self.path).query).get('id',[''])[0]
                 return self.json_response(storyboards.public(storyboards.require(identity)) if identity else {'boards':storyboards.list_projects()})
@@ -202,12 +262,23 @@ class Handler(BaseHTTPRequestHandler):
                 filename=path[9:]
                 if not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg|webp)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'uploads'/filename)
+            if path=='/fish-formal-review.html':return self.serve_file(storage.DATA/'reviews'/'fish-formal-review.html')
+            if path.startswith('/reviews/'):
+                filename=path[9:]
+                if not re.fullmatch(r'[a-f0-9]{32}\.(html|css|js)',filename):return self.json_response({'error':'页面不存在。'},404)
+                return self.serve_file(storage.DATA/'reviews'/filename)
             if path.startswith('/media/'):
                 filename=path[7:]
                 if not re.fullmatch(r'[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm|wav|mp3|m4a|ogg|flac)',filename):return self.json_response({'error':'文件不存在。'},404)
                 return self.serve_file(storage.DATA/'media'/filename,download='download' in parse_qs(urlsplit(self.path).query))
             static={'/':'index.html','/index.html':'index.html','/audio.js':'audio.js','/app.js':'app.js','/image-controls.js':'image-controls.js','/video-controls.js':'video-controls.js','/style.css':'style.css','/connections.js':'connections.js','/connections.css':'connections.css','/favicon.svg':'favicon.svg'}
             static.update({'/library-picker.js':'library-picker.js','/storyboard-layout.js':'storyboard-layout.js','/storyboards.js':'storyboards.js','/storyboards.css':'storyboards.css'})
+            static.update({'/visual-graph.js':'visual-graph.js','/visual-studio.js':'visual-studio.js','/visual-studio.css':'visual-studio.css'})
+            static.update({'/visual-film.js':'visual-film.js','/visual-film.css':'visual-film.css'})
+            static.update({'/creator.js':'creator.js','/creator.css':'creator.css'})
+            static.update({'/novel-studio.js':'novel-studio.js','/novel-studio.css':'novel-studio.css','/novel-workbench.js':'novel-workbench.js','/novel-workbench.css':'novel-workbench.css'})
+            static.update({('/'+name):name for name in ('production-desk.js','production-desk.css','novel-automation.js','novel-automation.css','studio-shell.js','studio-shell.css','novel-fidelity.js','production-flow.js','production-flow.css')})
+            static.update({('/'+name):name for name in ('ai-control.js','novel-references.js','library-v2.js','production.css','project-manager.js','workspace-polish.css')})
             if path in static:return self.serve_file(ROOT/'public'/static[path])
             return self.json_response({'error':'页面不存在。'},404)
         except (BrokenPipeError,ConnectionResetError):return
@@ -242,7 +313,28 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=maximum:return self.json_response({'error':'请求大小无效。图片最大 10 MiB。'},413)
             body=json.loads(self.rfile.read(length),parse_constant=lambda x:(_ for _ in ()).throw(ValueError('JSON 不允许非有限数值。')))
             if not isinstance(body,dict):raise ValueError('请求必须为 JSON 对象。')
+            if self.path in ('/api/drafts/save','/api/materials/save','/api/collections/save'):
+                return self.json_response(creative_workspace.save(body,{'drafts':'draft','materials':'material','collections':'collection'}[self.path.split('/')[2]]))
+            if self.path in ('/api/drafts/delete','/api/materials/delete'):
+                return self.json_response(creative_workspace.remove(body,{'drafts':'draft','materials':'material'}[self.path.split('/')[2]]))
+            if self.path=='/api/collections/assign':return self.json_response(creative_workspace.assign(body))
             if self.path=='/api/uploads':return self.json_response(uploads.save(body),201)
+            if self.path=='/api/projects/organize':return self.json_response(project_manager.organize(body))
+            if self.path=='/api/ai-control/save':return self.json_response(ai_control.save(body))
+            if self.path=='/api/novels/references':return self.json_response(novel_studio.set_references(body))
+            if self.path=='/api/novels/save':return self.json_response(novel_studio.save(body))
+            if self.path=='/api/novels/command':return self.json_response(novel_studio.command(body,ACTIVE,ACTIVE_LOCK))
+            if self.path=='/api/novels/edit':return self.json_response(novel_studio.edit(body))
+            if self.path=='/api/novels/asset':return self.json_response(novel_studio.replace_asset(body))
+            if self.path=='/api/visual-projects/save':return self.json_response(visual_studio.save(body))
+            if self.path=='/api/visual-projects/film-plan':return self.json_response(film_plan.plan(body))
+            if self.path=='/api/visual-projects/film-retry':return self.json_response(film_queue.retry(body,ACTIVE,ACTIVE_LOCK))
+            if self.path=='/api/visual-projects/film-generate':return self.json_response(visual_film.generate(body,create_job,dispatch,ACTIVE,ACTIVE_LOCK),202)
+            if self.path=='/api/visual-projects/generate':return self.json_response(visual_studio.generate(body,create_job,dispatch,ACTIVE,ACTIVE_LOCK),202)
+            if self.path=='/api/visual-projects/adopt':return self.json_response(visual_studio.adopt(body))
+            if self.path=='/api/visual-projects/review':return self.json_response(visual_studio.acknowledge(body))
+            if self.path=='/api/visual-projects/transfer':return self.json_response(visual_studio.transfer(body))
+            if self.path=='/api/visual-projects/import-legacy':return self.json_response(visual_studio.import_legacy(body))
             if self.path=='/api/storyboards/save':return self.json_response(storyboards.save(body))
             if self.path=='/api/storyboards/generate':return self.json_response(storyboards.generate(body,create_job,dispatch,ACTIVE,ACTIVE_LOCK),202)
             if self.path=='/api/storyboards/confirm':return self.json_response(storyboards.confirm(body,ACTIVE_LOCK))
@@ -276,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json_response(storage.public_job(job))
             if self.path=='/api/shutdown':
                 with ACTIVE_LOCK:
-                    if ACTIVE:raise ValueError('仍有生成或作品保存任务正在运行，请等待完成后再关闭。')
+                    if ACTIVE or any(j.get('film_batch') and j['status'] in STATUS_ACTIVE for j in storage.items('jobs',-1)) or any(p['phase'] in novel_studio.AUTOMATIC and not p['paused'] for p in storage.items('novel_projects',-1)):raise ValueError('仍有生成、制片队列或作品保存任务正在运行，请先暂停制片并等待已提交任务完成后关闭。')
                     (storage.DATA/'service.paused').write_text('User requested stop\n',encoding='utf-8')
                     self.json_response({'ok':True});threading.Thread(target=self.server.shutdown,daemon=True).start();return
             return self.json_response({'error':'接口不存在。'},404)
@@ -289,10 +381,10 @@ def main():
     storage.init()
     try:httpd=ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
     except OSError:print(f'Port {PORT} unavailable. Choose GUANGYU_PORT without stopping other services.',flush=True);return 1
-    httpd.daemon_threads=True;recover();print(f'Guangyu AI: {ORIGIN}',flush=True)
+    httpd.daemon_threads=True;recover();FILM_STOP.clear();threading.Thread(target=film_monitor,daemon=True,name='film-scheduler').start();print(f'Guangyu AI: {ORIGIN}',flush=True)
     try:httpd.serve_forever()
     except KeyboardInterrupt:pass
-    finally:httpd.server_close();POOL.shutdown(wait=False,cancel_futures=True)
+    finally:FILM_STOP.set();httpd.server_close();POOL.shutdown(wait=False,cancel_futures=True);COMPOSE_POOL.shutdown(wait=False,cancel_futures=True)
     return 0
 
 if __name__=='__main__':

@@ -1,0 +1,12 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const ctx=vm.createContext({console});
+vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../public/project-manager.js'),'utf8'),ctx);
+vm.runInContext(`projectView.items=[{id:'a',title:'First story',kind:'novel',status:'paused',pinned:false,archived:false,updated_at:'2026-09-30'},{id:'b',title:'Board',kind:'visual',status:'draft',pinned:true,archived:false,updated_at:'2026-09-29'},{id:'c',title:'Old story',kind:'novel',status:'complete',pinned:false,archived:true,updated_at:'2026-09-28'}]`,ctx);
+const ids=()=>JSON.parse(vm.runInContext('JSON.stringify(projectList().map(p=>p.id))',ctx));
+assert.deepEqual(ids(),['b','a']);
+vm.runInContext("projectView.filter='archived'",ctx);assert.deepEqual(ids(),['c']);
+vm.runInContext("projectView.filter='all';projectView.kind='novel'",ctx);assert.deepEqual(ids(),['a']);
+vm.runInContext("projectView.kind='all';projectView.query='STORY'",ctx);assert.deepEqual(ids(),['a']);
+vm.runInContext("projectView.query='';projectView.filter='paused'",ctx);assert.deepEqual(ids(),['a']);
+vm.runInContext("projectView.filter='pinned'",ctx);assert.deepEqual(ids(),['b']);
+console.log('PASS project filter, archive separation, pin-first ordering and title search');

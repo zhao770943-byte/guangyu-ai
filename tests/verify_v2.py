@@ -272,7 +272,7 @@ def run():
         probe.bind(('127.0.0.1', 0))
         ORIGIN = 'http://127.0.0.1:' + str(probe.getsockname()[1])
     start()
-    assert fetch('/api/health')['version'].startswith('2.')
+    assert fetch('/api/health')['version'] == (APP / 'VERSION').read_text(encoding='utf-8').strip()
     refs = [upload(PNG), upload(JPEG, 'fixture.jpg'), upload(WEBP, 'fixture.webp')]
     first, last = upload(FRAME, 'first.png'), upload(TAIL, 'last.png')
 

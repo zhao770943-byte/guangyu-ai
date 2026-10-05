@@ -49,7 +49,7 @@ def validate_platform(identity):
 
 def prepare(body):
     """Validate an unsaved form without requiring model ID or writing storage."""
-    identity = body.get('id') or ''
+    identity = body.get('id') or body.get('credential_source_id') or ''
     existing = None
     if identity:
         if not isinstance(identity, str) or not re.fullmatch(r'[a-f0-9]{32}', identity):
@@ -190,7 +190,8 @@ def _suggestions(identity, item, family, provider):
     task=providers.audio_task(identity)
     if task:
         if task=='speech':
-            protocol='minimax_speech' if leaf.startswith('speech-') and provider.get('platform')=='minimax' else ('openai_speech' if leaf.startswith(('tts-','gpt-4o-mini-tts')) else None)
+            if leaf in ('cosyvoice-v3.5-plus','cosyvoice-v3.5-flash') and provider.get('platform')=='dashscope':return ['audio'],'cosyvoice_speech'
+            protocol='qwen_speech' if re.fullmatch(r'qwen3-tts-(?:(?:instruct-)?flash(?:-\d{4}-\d{2}-\d{2})?|vc-\d{4}-\d{2}-\d{2})',leaf) and provider.get('platform')=='dashscope' else 'minimax_speech' if leaf.startswith('speech-') and provider.get('platform')=='minimax' else ('openai_speech' if leaf.startswith(('tts-','gpt-4o-mini-tts')) else None)
             return ['audio'],protocol
         return ['audio'],None
     if leaf in ('image-01','image-01-live') and provider.get('platform')=='minimax':return ['image'],'minimax_image'
@@ -242,8 +243,9 @@ def _normalize(values, family, provider, key):
             kinds=[task_kind] if protocol else []
         leaf=identity.lower().rsplit('/',1)[-1]
         if not classified:
-            if any(x in leaf for x in ('video','hailuo','veo','wan2','wan-','seedance','kling')):classified=['video']
+            if any(x in leaf for x in ('video','hailuo','veo','seedance','kling')):classified=['video']
             elif any(x in leaf for x in ('image','flux','stable-diffusion','sdxl','imagen')):classified=['image']
+            elif leaf.startswith(('wan2','wan-')):classified=['video']
         architecture=item.get('architecture') if isinstance(item.get('architecture'),dict) else {}
         output=architecture.get('output_modalities',item.get('output_modalities',[]))
         if not constraints['kinds'] and isinstance(output,list):
@@ -252,7 +254,8 @@ def _normalize(values, family, provider, key):
         if provider['protocol'] == 'custom' and protocol:
             protocol = 'custom'
         elif selected:
-            kinds = [kind for kind in kinds if kind in selected.get('protocols', {})]
+            kinds = [kind for kind in kinds if kind in selected.get('protocols', {}) or
+                     (kind=='audio' and protocol in ('qwen_speech','cosyvoice_speech') and provider.get('platform')=='dashscope')]
             if not kinds:
                 protocol = None
         if weijin_video.destination(provider) and (weijin_video.metadata(item) or identity=='seedance2.5-9图'):

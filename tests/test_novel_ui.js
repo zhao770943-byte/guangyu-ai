@@ -1,0 +1,21 @@
+// Offline presentation/state contracts. Real browser checks are recorded separately.
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const context=vm.createContext({console,setTimeout,clearTimeout,setInterval(){},window:{addEventListener(){}},document:{querySelector(){return null},querySelectorAll(){return []},addEventListener(){}}});
+const root=path.resolve(__dirname,'..','public');
+vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8').split("document.addEventListener('click'")[0],context);
+vm.runInContext(fs.readFileSync(path.join(root,'novel-studio.js'),'utf8'),context);
+for(const file of ['ai-control.js','novel-references.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context);
+vm.runInContext(`state.providers=[{id:'t',kind:'chat',name:'text',model:'text'},{id:'i1',kind:'image',name:'plain',model:'image',capabilities:{}},{id:'i2',kind:'image',name:'reference',model:'image',capabilities:{reference_images:true}},{id:'v',kind:'video',name:'video',model:'video',capabilities:{first_frame:true}}];`,context);
+assert.equal(vm.runInContext('novelFresh().image_provider_id',context),'i2');
+assert.equal(vm.runInContext('novelFresh().video_provider_id',context),'v');
+assert.doesNotMatch(vm.runInContext("novelModels('image','i2')",context),/value="i1"/);
+vm.runInContext(`novelView.project={...novelFresh(),id:'p',version:1,phase:'script_review',plan:{summary:'<img src=x onerror=alert(1)>',assets:[{id:'a',kind:'character',name:'<script>',description:'safe',prompt:'safe',evidence:'source'}],episodes:[]},durations:[15],needs_audit:false};`,context);
+assert.match(vm.runInContext('novelScript(novelView.project)',context),/&lt;img/);
+assert.doesNotMatch(vm.runInContext('novelAssets(novelView.project)',context),/<script>/);
+assert.doesNotMatch(vm.runInContext('novelToolbar(novelView.project)',context),/approve_script" disabled/);
+vm.runInContext('novelView.dirty=true',context);
+assert.match(vm.runInContext('novelToolbar(novelView.project)',context),/approve_script" disabled/);
+assert.equal(vm.runInContext("novelDefaultTab('asset_review')",context),'assets');
+assert.equal(vm.runInContext("novelDefaultTab('complete')",context),'tasks');
+assert.match(vm.runInContext('novelStory(novelView.project)',context),/<fieldset disabled/);
+console.log('PASS novel model capability filters, review gates, frozen settings, phase navigation and escaped model text');

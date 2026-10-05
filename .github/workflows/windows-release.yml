@@ -32,6 +32,13 @@ jobs:
         run: python -X utf8 -m unittest discover -s tests -p "test_*.py" -v
       - name: HTTP integration checks
         run: python -X utf8 tests/verify_v2.py
+      - name: Frontend regression checks
+        shell: pwsh
+        run: |
+          Get-ChildItem tests/test_*.js | Sort-Object Name | ForEach-Object {
+            node $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Frontend check failed: $($_.Name)" }
+          }
       - name: Core regression checks
         run: python -X utf8 tests/verify_workbench.py
       - name: Build portable application

@@ -1,0 +1,9 @@
+interface:
+  display_name: "光屿工作台实现"
+  short_description: "把制作失败转成可验证的工作台行为，完成设计、代码、测试与本机部署"
+  icon_small: "../../assets/icon.svg"
+  icon_large: "../../assets/icon.svg"
+  brand_color: "#C4944B"
+  default_prompt: "使用 $guangyu-workbench 检查当前光屿实现，按本集制作经验设计并落地升级，保护已接受作品与数据。"
+policy:
+  allow_implicit_invocation: true

@@ -38,6 +38,14 @@ def remove(identity):
             raise ValueError('作品不存在。')
         if job.get('work_deleted_at'):
             return cleanup(job) if job.get('work_cleanup_pending') else job
+        if job.get('novel_project_id'):
+            project = storage.get('novel_projects', job['novel_project_id'])
+            if project and project['phase'] != 'complete':
+                raise ValueError('此作品仍用于小说项目制作，请在项目完成后删除。')
+        if job.get('film_parent_id'):
+            parent = storage.get('jobs', job['film_parent_id'])
+            if parent and parent['status'] != 'succeeded' and not parent.get('work_deleted_at'):
+                raise ValueError('此片段仍用于整片合成，请在整片完成后删除。')
         assets = (job.get('result') or {}).get('assets', [])
         if job['status'] != 'succeeded' or job['kind'] not in ('image', 'video', 'audio') or not assets:
             raise ValueError('只能删除生成成功的媒体作品。')

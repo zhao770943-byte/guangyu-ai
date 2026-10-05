@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import socket
+import ssl
 import sys
 import tempfile
 import threading
@@ -42,6 +43,53 @@ class CDN(BaseHTTPRequestHandler):
         self.reply(PNG)
 
 class MediaStoreTests(unittest.TestCase):
+    def test_known_cdn_proxy_keeps_get_only_and_validates_content(self):
+        from unittest.mock import MagicMock
+        response=MagicMock();response.__enter__.return_value=response;response.status=200;response.read.return_value=PNG
+        opener=MagicMock();opener.open.return_value=response
+        addresses=[(socket.AF_INET,socket.SOCK_STREAM,6,'',('172.67.138.32',443))]
+        with patch.object(socket,'getaddrinfo',return_value=addresses),patch.object(urllib.request,'getproxies',return_value={'https':'http://127.0.0.1:7890'}),patch.object(urllib.request,'build_opener',return_value=opener):
+            result=media_store.download({'type':'image','url':'https://media.lensapi.cn/fixture.png'},{'id':'proxy-fixture'},0)
+            self.assertTrue(result['local'])
+            request=opener.open.call_args.args[0]
+            self.assertEqual(request.get_method(),'GET')
+            self.assertNotIn('Authorization',request.headers);self.assertNotIn('Cookie',request.headers)
+            response.read.return_value=b'<html>not an image</html>'
+            with self.assertRaises(media_store.SaveError):media_store.download({'type':'image','url':'https://media.lensapi.cn/fixture.png'},{'id':'proxy-fixture'},0)
+            opener.open.side_effect=urllib.error.URLError(ssl.SSLCertVerificationError('invalid'))
+            with self.assertRaises(media_store.SaveError):media_store.download({'type':'image','url':'https://media.lensapi.cn/fixture.png'},{'id':'proxy-fixture'},0)
+        private=[(socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',443))]
+        with patch.object(socket,'getaddrinfo',return_value=private),patch.object(urllib.request,'getproxies',return_value={'https':'http://127.0.0.1:7890'}),patch.object(urllib.request,'build_opener') as build:
+            with self.assertRaises(media_store.SaveError):media_store.download({'type':'image','url':'https://media.lensapi.cn/x'},{'id':'proxy-fixture'},0)
+            build.assert_not_called()
+
+    def test_tls_timeout_fallback_keeps_hostname_and_rejects_bad_certificate(self):
+        addresses=[(socket.AF_INET6,socket.SOCK_STREAM,6,'',('2606:4700:3037::ac43:8a20',443,0,0)),
+                   (socket.AF_INET,socket.SOCK_STREAM,6,'',('172.67.138.32',443))]
+        with patch.object(socket,'getaddrinfo',return_value=addresses),patch.object(media_store.http.client.HTTPSConnection,'connect',side_effect=[TimeoutError('TLS timeout'),None]) as connect:
+            conn,_=media_store.connection('https://cdn.example/image.png',{})
+            conn.connect()
+            self.assertEqual(connect.call_count,2)
+            self.assertEqual(conn.host,'cdn.example')
+        with patch.object(socket,'getaddrinfo',return_value=addresses),patch.object(media_store.http.client.HTTPSConnection,'connect',side_effect=ssl.SSLCertVerificationError('invalid certificate')) as connect:
+            conn,_=media_store.connection('https://cdn.example/image.png',{})
+            with self.assertRaises(ssl.SSLCertVerificationError):conn.connect()
+            self.assertEqual(connect.call_count,1)
+
+    def test_unreachable_ipv6_falls_back_only_to_validated_ipv4(self):
+        addresses=[(socket.AF_INET6,socket.SOCK_STREAM,6,'',('2606:4700:3037::ac43:8a20',443,0,0)),
+                   (socket.AF_INET,socket.SOCK_STREAM,6,'',('172.67.138.32',443))]
+        marker=object()
+        with patch.object(socket,'getaddrinfo',return_value=addresses), patch.object(socket,'create_connection',side_effect=[OSError('unreachable'),marker]) as connect:
+            conn,parsed=media_store.connection('https://cdn.example/image.png',{})
+            self.assertIs(conn._create_connection(('cdn.example',443),15),marker)
+            self.assertEqual([call.args[0] for call in connect.call_args_list],[('2606:4700:3037::ac43:8a20',443),('172.67.138.32',443)])
+            self.assertEqual(conn.host,'cdn.example')
+        private=addresses+[(socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',443))]
+        with patch.object(socket,'getaddrinfo',return_value=private),patch.object(socket,'create_connection') as connect:
+            with self.assertRaises(media_store.SaveError):media_store.connection('https://cdn.example/image.png',{})
+            connect.assert_not_called()
+
     @classmethod
     def setUpClass(cls):
         cls.temp=tempfile.TemporaryDirectory();cls.data_patch=patch.object(storage,'DATA',Path(cls.temp.name));cls.data_patch.start();storage.init()

@@ -2,6 +2,15 @@
 import math
 import re
 from functools import lru_cache
+from urllib.parse import urlsplit
+
+
+def provider_sized_variant(provider):
+    # These are provider aliases with a different size whitelist. The live
+    # catalog supplies IDs, not that whitelist; do not invent GPT pixel presets.
+    return (provider.get('protocol') == 'openai_image'
+            and urlsplit(provider.get('base_url', '')).hostname in ('weijinapi.top', 'www.weijinapi.top')
+            and provider.get('model') in ('gpt-image-2.5-sunburst新', 'gpt-image-2.5-flare新'))
 
 
 @lru_cache(maxsize=512)
@@ -49,6 +58,8 @@ def options(provider):
     result = {'mode': 'none', 'ratios': [], 'levels': [], 'quality': [], 'sizes': []}
     if provider.get('kind') != 'image':
         return result
+    if provider_sized_variant(provider):
+        return {**result, 'mode': 'custom'}
     if caps['quality']:
         result['quality'] = [['standard', '标准'], ['hd', '高清']] if model == 'dall-e-3' else [
             ['low', '快速草稿'], ['medium', '均衡'], ['high', '精细']]
@@ -87,6 +98,10 @@ def validate_size(provider, size):
     if size!='auto' and provider.get('protocol')=='openai_image' and provider.get('platform')=='xai':
         raise ValueError('Grok 图像不使用 OpenAI 的像素尺寸字段，请保持模型默认尺寸。')
     if size == 'auto' or provider.get('protocol') != 'openai_image':
+        return
+    if provider_sized_variant(provider):
+        if size == '1536x864':
+            raise ValueError('此平台新型号不支持1536x864，请先用模型默认尺寸，或填写平台明确列出的1K/2K/4K像素尺寸。')
         return
     model = provider.get('model', '').lower()
     if flexible(model):

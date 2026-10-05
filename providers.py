@@ -2,7 +2,8 @@
 import base64, binascii, copy, json, re, socket, time
 import urllib.error, urllib.parse, urllib.request
 import storage, capabilities, uploads
-PROTOCOLS = {'image':{'openai_image','minimax_image','ark_image','gemini','custom'},'video':{'openai_video','weijin_video','comfy_h3','ark_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','custom'}}
+from provider_network import LocalProxyRoutes
+PROTOCOLS = {'image':{'openai_image','minimax_image','ark_image','gemini','custom'},'video':{'openai_video','weijin_video','comfy_h3','ark_video','custom'},'chat':{'openai_chat','openai_responses','anthropic','gemini','custom'},'audio':{'openai_speech','minimax_speech','qwen_speech','cosyvoice_speech','custom'}}
 MAX_JSON = 96*1024*1024
 MAX_MEDIA = 512*1024*1024
 POLL_SECONDS, POLL_TIMEOUT = 5, 1800
@@ -15,7 +16,7 @@ class ProviderError(Exception):
         self.code = code
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl): return None
-OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+OPENER = urllib.request.build_opener(LocalProxyRoutes(lambda: storage.DATA / 'provider-network.json'),NoRedirect())
 def clean_error(text,p):
     key = storage.crypt(p.get('secret',''),decrypt=True)
     value = str(text)
@@ -32,6 +33,19 @@ def validate_path(path,allow_id=False):
     return path
 def endpoint(p,path):
     validate_path(path)
+    # Qwen uses DashScope's native route on the same documented host. Keep the
+    # stored base URL intact so exact-destination credential reuse stays intact.
+    url=urllib.parse.urlsplit(p['base_url'])
+    if p.get('protocol')=='cosyvoice_speech':
+        if path != '/services/audio/tts/SpeechSynthesizer':
+            raise ValueError('CosyVoice 协议仅支持已适配的语音提交路径。')
+        if url.hostname != 'dashscope.aliyuncs.com' and not re.fullmatch(r'[a-zA-Z0-9-]+\.cn-beijing\.maas\.aliyuncs\.com',url.hostname or ''):
+            raise ValueError('CosyVoice 当前仅适配百炼北京地域官方接口。')
+        return urllib.parse.urlunsplit((url.scheme,url.netloc,'/api/v1'+path,'',''))
+    if p.get('protocol')=='qwen_speech' and url.hostname in ('dashscope.aliyuncs.com','dashscope-intl.aliyuncs.com'):
+        if path != '/services/aigc/multimodal-generation/generation':
+            raise ValueError('千问语音协议仅支持已适配的语音提交路径。')
+        return urllib.parse.urlunsplit((url.scheme,url.netloc,'/api/v1'+path,'',''))
     return p['base_url'].rstrip('/')+path
 def validate_base_url(value,allow_local=False):
     if not isinstance(value,str) or not value.strip() or len(value)>2000:raise ValueError('base_url 不能为空或过长。')
@@ -107,6 +121,7 @@ def model_constraints(identity):
 
 def audio_task(identity):
     model=str(identity or '').lower().rsplit('/',1)[-1]
+    if model.startswith('cosyvoice-'):return 'speech'
     if model.startswith(('playai-tts','orpheus-','kokoro-')):return 'speech'
     if re.match(r'^(?:tts-\d|gpt-4o-mini-tts(?:-|$)|speech-\d)',model) or re.search(r'(?:^|[-_])tts(?:[-_]|$)',model):return 'speech'
     if 'whisper' in model or 'transcrib' in model or re.search(r'(?:^|[-_])asr(?:[-_]|$)',model):return 'transcription'
@@ -118,6 +133,8 @@ def audio_task(identity):
 
 def validate_model_kind(provider):
     constraints=model_constraints(provider.get('model'))
+    if provider.get('protocol')=='cosyvoice_speech' and provider.get('model') not in ('cosyvoice-v3.5-plus','cosyvoice-v3.5-flash'):
+        raise ValueError('当前 CosyVoice 协议适配 3.5 Plus / Flash 自定义声线，请选择对应型号。')
     if constraints['kinds'] and provider.get('kind') not in constraints['kinds']:
         labels={'chat':'文本','image':'图像','video':'视频','audio':'音频'}
         expected=' / '.join(labels[kind] for kind in constraints['kinds'])
@@ -129,6 +146,8 @@ def validate_model_kind(provider):
             raise ValueError('MiniMax 官方图像接口使用 /image_generation，不支持 OpenAI Images 的 /images/generations。请选择 MiniMax 图像协议。')
     if provider.get('protocol') in ('openai_speech','minimax_speech') and audio_task(provider.get('model')) not in ('','speech'):
         raise ValueError('该型号不是语音合成模型，不能使用文字转语音接口。请更换语音合成型号。')
+    if provider.get('protocol')=='qwen_speech' and not re.fullmatch(r'qwen3-tts-(?:(?:instruct-)?flash(?:-\d{4}-\d{2}-\d{2})?|vc-\d{4}-\d{2}-\d{2})',provider.get('model','')):
+        raise ValueError('千问语音协议适配非实时 Qwen3-TTS-Flash / Instruct-Flash / VC，请选择对应型号。')
     return constraints
 
 def validate(p):
@@ -359,6 +378,33 @@ def build(p,job):
         speed=params.get('speed',1)
         if protocol=='openai_speech':path,body='/audio/speech',{'model':model,'input':prompt,'voice':voice,'speed':speed,'response_format':'wav'}
         else:path,body='/t2a_v2',{'model':model,'text':prompt,'stream':False,'output_format':'url','voice_setting':{'voice_id':voice,'speed':speed,'vol':1,'pitch':0},'audio_setting':{'format':'mp3','sample_rate':32000,'bitrate':128000,'channel':1}}
+        if protocol == 'minimax_speech' and params.get('style'):
+            body['voice_setting']['emotion'] = params['style']
+    elif protocol=='cosyvoice_speech':
+        voice=params.get('voice') or p.get('extra',{}).get('voice')
+        if not isinstance(voice,str) or not voice.startswith(model+'-'):
+            raise ValueError('CosyVoice 3.5 需要此型号创建的自定义音色，不能使用系统音色或其他型号的音色。')
+        body={'model':model,'input':{'text':prompt,'voice':voice,'format':'wav','sample_rate':24000,'language_hints':['zh']}}
+        if params.get('instructions'):
+            weighted=sum(2 if '\u3040'<=ch<='\u30ff' or '\u3400'<=ch<='\u9fff' or '\uf900'<=ch<='\ufaff' else 1 for ch in params['instructions'])
+            if weighted>100:raise ValueError('CosyVoice 表演指令最多 100 字符，汉字按 2 字符计算。请精简指令。')
+            body['input']['instruction']=params['instructions']
+        if 'speed' in params:
+            if not .5<=params['speed']<=2:raise ValueError('CosyVoice 语速范围为 0.5–2。')
+            body['input']['rate']=params['speed']
+        if 'seed' in params:
+            if not 0<=params['seed']<=65535:raise ValueError('CosyVoice 随机种子范围为 0–65535。')
+            body['input']['seed']=params['seed']
+        path='/services/audio/tts/SpeechSynthesizer'
+    elif protocol=='qwen_speech':
+        if len(prompt)>600:raise ValueError('千问语音单次文本最多 600 字符。')
+        voice=params.get('voice') or p.get('extra',{}).get('voice')
+        if model.startswith('qwen3-tts-vc-') and not voice:raise ValueError('此模型需要已创建的复刻音色 ID，请先选择角色音色。')
+        voice=voice or 'Serena'
+        body={'model':model,'input':{'text':prompt,'voice':voice,'language_type':'Chinese'}}
+        if params.get('instructions'):
+            body['input'].update(instructions=params['instructions'],optimize_instructions=True)
+        path='/services/aigc/multimodal-generation/generation'
     elif protocol=='comfy_h3':
         import comfy_h3
         comfy_h3.validate_job(p,job)
@@ -373,9 +419,14 @@ def build(p,job):
     else:raise ProviderError('不支持的协议。')
     if protocol!='custom':
         # UI-selected inputs/model/conversation win over connection defaults.
-        body=merge(p.get('extra',{}),body)
+        defaults=copy.deepcopy(p.get('extra',{}))
+        if protocol in ('qwen_speech','cosyvoice_speech'):defaults.pop('voice',None)
+        body=merge(defaults,body)
     if kind=='chat' and protocol not in ('custom','gemini'):body['stream']=False
     if protocol=='openai_responses':body['background']=False
+    if job.get('vision_upload_ids'):
+        import ai_control
+        body=ai_control.add_vision_payload(p,job,body)
     return path,body,multipart
 
 def _count(value):
@@ -491,6 +542,8 @@ def extract(p,result,job_id):
         for item in dig(result,'data.image_base64') or []:assets.append(save_image(item,job_id))
         if not assets:
             for item in dig(result,'data.image_urls') or []:assets.append(media_url(item,'image'))
+    elif protocol in ('qwen_speech','cosyvoice_speech'):
+        if dig(result,'output.audio.url'):assets.append(media_url(dig(result,'output.audio.url'),'audio'))
     elif protocol=='minimax_speech':
         if dig(result,'data.audio'):assets.append(media_url(dig(result,'data.audio'),'audio'))
     return {'text':text.strip(),'assets':assets,**response_meta(p,result)}
@@ -569,6 +622,8 @@ def execute(p,job,resume=False):
         if ex.response:record_response(p,job['id'],ex.response)
         raise
     metadata=record_response(p,job['id'],result)
+    if p['protocol']=='cosyvoice_speech' and result.get('code'):
+        raise ProviderError('CosyVoice 返回错误：'+clean_error(result.get('message') or result['code'],p),response=result,code=str(result['code']))
     if p['protocol']=='ark_video':
         import ark_media
         identity=result.get('id')

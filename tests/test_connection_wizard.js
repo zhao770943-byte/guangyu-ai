@@ -21,7 +21,7 @@ const presets=[
   {id:'comfy_h3',name:'Local H3',base_url:'http://127.0.0.1:8188',model_types:['video'],protocols:{video:'comfy_h3'},discovery_protocol:'comfy_h3',allow_local:true},
   {id:'custom',name:'Custom',base_url:'',model_types:['chat','audio','image','video'],protocols:{}}
 ];
-function wizard(kind='',original){
+function wizard(kind='chat',original,savedProviders=original?[original]:[],reuseSource=null){
   const fields={},nodes={},buttons=['chat','audio','image','video'].map(k=>{const e=new Element();e.dataset.modelType=k;return e});
   const field=name=>fields[name]||(fields[name]=new Element());
   ['platform','protocol','discovery_protocol'].forEach(k=>field(k).select=true);
@@ -39,73 +39,72 @@ function wizard(kind='',original){
   const context=vm.createContext({console,setTimeout,clearTimeout,document:{querySelector:s=>s==='#provider-form'?form:s==='#provider-dialog'?dialog:undefined,querySelectorAll:()=>[]}});
   vm.runInContext(fs.readFileSync(path.join(root,'public/connections.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
-  context.form=form;context.original=original;context.presets=presets;context.kind=kind;
-  vm.runInContext('api=()=>{throw Error("Type selection must not send requests")};setupConnectionWizard(form,original,presets,kind)',context);
-  return {fields,nodes,buttons,field,choose:identity=>radios.find(r=>r.value===identity).onchange(),click:k=>buttons.find(b=>b.dataset.modelType===k).onclick()};
+  context.form=form;context.savedProviders=savedProviders;vm.runInContext('state.providers=savedProviders',context);context.original=original;context.presets=presets;context.kind=kind;
+  context.reuseSource=reuseSource;
+  vm.runInContext('api=()=>{throw Error("Unexpected request")};wizardApi=setupConnectionWizard(form,original,presets,kind,reuseSource)',context);
+  return {context,form,fields,nodes,field,choose:identity=>{nodes['#connection-model-select'].value=identity;nodes['#connection-model-select'].onchange()},type:k=>{nodes['#connection-kind-select'].value=k;nodes['#connection-kind-select'].onchange()}};
 }
-for(const kind of ['chat','audio','image','video']){
-  const w=wizard();w.click(kind);
-  assert.equal(w.field('kind').value,kind);
-  assert.equal(w.nodes['#connection-platform-pane'].hidden,false,'type must advance to vendor page');
-  assert.equal(w.nodes['#connection-type-pane'].hidden,true);
-  assert.deepEqual([...w.field('platform').options].sort(),presets.filter(p=>p.model_types.includes(kind)).map(p=>p.id).sort());
-}
-const preselected=wizard('image');preselected.click('image');
-assert.equal(preselected.nodes['#connection-platform-pane'].hidden,false,'clicking the default type also advances');
-const w=wizard('chat');w.click('chat');
-w.field('platform').value='deepseek';w.field('platform').onchange();w.field('api_key').value='fixture-only';w.field('model').value='old-model';
-w.click('video');
-assert.equal(w.field('platform').value,'openai');
-assert.equal(w.field('base_url').value,presets[0].base_url);
-assert.equal(w.field('api_key').value,'','a new vendor must never receive the old key');
-assert.equal(w.field('model').value,'');
-assert.ok(!w.field('platform').options.includes('deepseek'));
-w.field('api_key').value='same-vendor-fixture';w.click('image');
-assert.equal(w.field('api_key').value,'same-vendor-fixture','same destination keeps typed key');
-assert.equal(w.field('protocol').value,'openai_image');
-const edited=wizard('chat',{platform:'deepseek',kind:'chat',model:'deepseek-chat',protocol:'openai_chat',base_url:'https://api.deepseek.com',custom:{}});
-edited.click('video');assert.ok(!edited.field('platform').options.includes('deepseek'),'original vendor must not leak into another type');
-const legacy=wizard('video',{platform:'deepseek',kind:'video',model:'legacy',protocol:'custom',base_url:'https://proxy.example/v1',custom:{}});
-assert.equal(legacy.field('platform').value,'custom');
-assert.equal(legacy.field('base_url').value,'https://proxy.example/v1','legacy connections retain their destination');
-const local=wizard('video');local.field('platform').value='comfy_h3';local.field('platform').onchange();
-assert.equal(local.field('protocol').value,'comfy_h3');assert.equal(local.field('discovery_protocol').value,'comfy_h3');
-assert.equal(local.field('base_url').value,'http://127.0.0.1:8188');assert.equal(local.field('allow_local').checked,true);
-assert.ok(local.nodes['#connection-directory-preview'].textContent.endsWith('/object_info'));
-presets.push({id:'scoped',name:'Scoped',category:'domestic',base_url:'https://scope.example/chat/v1',
-  model_types:['chat','image'],protocols:{chat:'openai_chat'},families:{chat:'Text Family',image:'Picture Family'},
-  profiles:{chat:{base_url:'https://scope.example/chat/v1',protocol:'openai_chat'},image:{base_url:'https://scope.example/media/v1',protocol:null}}});
-const scoped=wizard('chat');scoped.field('platform').value='scoped';scoped.field('platform').onchange();
-scoped.field('api_key').value='private-key';scoped.click('image');
-assert.equal(scoped.field('base_url').value,'https://scope.example/media/v1');
-assert.equal(scoped.field('api_key').value,'','changing destination within the same vendor clears the key');
-assert.equal(scoped.field('protocol').value,'custom');
-scoped.nodes['#connection-vendor-search'].value='Picture';scoped.nodes['#connection-vendor-search'].oninput();
-assert.ok(scoped.nodes['#connection-vendor-grid'].innerHTML.includes('data-vendor="scoped"'));
-assert.ok(!scoped.nodes['#connection-vendor-grid'].innerHTML.includes('data-vendor="openai"'));
-assert.equal(scoped.field('platform').value,'scoped','search does not secretly change the destination');
-presets.push({id:'ark',name:'Ark',category:'domestic',base_url:'https://ark.example/api/v3',model_types:['video'],
-  protocols:{video:'ark_video'},families:{video:'Seedance 2.5 / 2.0'},official_models:[
-    {id:'doubao-seedance-2-5-260628',name:'Seedance 2.5',model_kinds:['video'],protocol:'ark_video',source:'official_catalog'}]});
-const ark=wizard();ark.click('video');assert.equal(ark.field('platform').value,'ark');
-assert.equal(ark.field('protocol').value,'ark_video');
-assert.ok(ark.nodes['#connection-request-url'].textContent.endsWith('/contents/generations/tasks'));
-assert.equal(ark.nodes['#connection-official-first'].hidden,false);
-ark.nodes['#connection-official-first'].onclick();
-assert.equal(ark.nodes['#connection-model-pane'].hidden,false);
-assert.ok(ark.nodes['#connection-model-list'].innerHTML.includes('Seedance 2.5'));
-assert.ok(ark.nodes['#connection-directory-note'].textContent.includes('尚未验证'));
-console.log('PASS four type filters, automatic step advance, default selection, vendor changes, key isolation and legacy editing');
-console.log('PASS vendor family search, modality-specific URLs, credential clearing and official Seedance selection without network');
 
-presets.push({id:'xai',name:'xAI',category:'international',base_url:'https://api.x.ai/v1',model_types:['video'],protocols:{video:'custom'},official_models:[
-  {id:'grok-imagine-video-1.5',model_kinds:['video'],protocol:'custom',custom:{submit_path:'/videos/generations',body:{model:'{{model}}',prompt:'{{prompt}}',duration:'{{seconds}}'},poll_path:'/videos/{id}',id_path:'request_id',status_path:'status',success_values:['done'],failure_values:['failed','expired'],media_path:'video.url'}},
-  {id:'grok-imagine-video-future',model_kinds:['video'],protocol:null}
-]});
-const grok=wizard('video');grok.field('platform').value='xai';grok.field('platform').onchange();
-grok.nodes['#connection-official-first'].onclick();grok.choose('grok-imagine-video-1.5');
-assert.equal(grok.field('submit_path').value,'/videos/generations');assert.equal(grok.field('id_path').value,'request_id');
-assert.equal(grok.field('poll_path').value,'/videos/{id}');assert.equal(grok.field('media_path').value,'video.url');
-assert.equal(grok.nodes['#connection-mapping-status'].hidden,true,'reviewed mapping must be ready to save');
-grok.choose('grok-imagine-video-future');assert.equal(grok.field('submit_path').value,'','unknown model must not inherit another model mapping');
-console.log('PASS documented model mappings auto-fill and never leak to an unknown model');
+(async()=>{
+ const saved=[
+  {id:'key-a',platform:'custom',base_url:'https://gateway.example/v1',kind:'chat',model:'text',name:'Account A',has_key:true,protocol:'openai_chat'},
+  {id:'key-b',platform:'media',base_url:'https://gateway.example/v1/',kind:'image',model:'image',name:'Account B',has_key:true,protocol:'openai_image'},
+  {id:'key-c',platform:'custom',base_url:'https://gateway.example/v2',kind:'chat',model:'text',name:'Different API path',has_key:true,protocol:'openai_chat'},
+  {id:'key-d',platform:'openai',base_url:'https://api.openai.com/v1',kind:'chat',model:'text',name:'Official',has_key:true,protocol:'openai_chat'}
+ ];
+ const quick=wizard('chat',null,saved,saved[0]);
+ assert.equal(quick.nodes['#connection-platform-pane'].hidden,true,'reuse opens model page directly');
+ assert.equal(quick.nodes['#connection-model-pane'].hidden,false);
+ assert.equal(quick.nodes['#connection-saved-access'].hidden,false);
+ assert.equal(quick.field('api_key').value,'');
+ let quickPayload;quick.context.mockApi=async(_,body)=>{quickPayload=body;return {models:[{id:'text-new',model_kinds:['chat'],protocol:'openai_chat'}]}};vm.runInContext('api=mockApi',quick.context);
+ await quick.context.wizardApi.discover();assert.equal(quickPayload.credential_source_id,'key-a');assert.equal(quickPayload.api_key,'');
+ quick.choose('text-new');assert.equal(quick.nodes['#connection-primary'].disabled,false);
+ quick.nodes['#connection-quick-source'].value='key-b';await quick.nodes['#connection-quick-source'].onchange();assert.equal(quickPayload.credential_source_id,'key-b');assert.equal(quickPayload.api_key,'');
+ quick.context.mockApi=async()=>{throw Error('401 Invalid token')};vm.runInContext('api=mockApi',quick.context);await quick.context.wizardApi.discover();
+ assert.equal(quick.nodes['#connection-model-pane'].hidden,false);assert.match(quick.nodes['#connection-error'].textContent,/401/);assert.equal(quick.nodes['#connection-back'].textContent,'连接设置');
+ const grouped=wizard('chat',null,saved);
+ assert.equal(grouped.nodes['#connection-saved-source-label'].hidden,true,'new vendor starts independently of saved sources');
+ assert.doesNotMatch(grouped.nodes['#connection-source-group'].innerHTML,/新增厂商|https?:\/\//,'saved choices contain names only');
+ grouped.nodes['#connection-source-saved'].onclick();
+ assert.equal(grouped.nodes['#connection-saved-source-label'].hidden,false);
+ assert.equal(grouped.nodes['#connection-source-saved']['aria-pressed'],true);
+ assert.equal(vm.runInContext('connectionSources(state.providers).length',grouped.context),3,'same endpoint groups rows but different paths remain distinct');
+ grouped.nodes['#connection-source-group'].value='key-a';grouped.nodes['#connection-source-group'].onchange();
+ assert.match(grouped.nodes['#connection-credential-source'].innerHTML,/key-a/);
+ assert.match(grouped.nodes['#connection-credential-source'].innerHTML,/key-b/);
+ assert.doesNotMatch(grouped.nodes['#connection-credential-source'].innerHTML,/key-c|key-d/);
+ grouped.nodes['#connection-credential-source'].value='key-b';grouped.nodes['#connection-credential-source'].onchange();
+ let sent;grouped.context.mockApi=async(_,body)=>{sent=body;return {models:[]}};vm.runInContext('api=mockApi',grouped.context);
+ await grouped.context.wizardApi.discover();assert.equal(sent.credential_source_id,'key-b','exact chosen account is reused, not the first key of the group');
+ grouped.field('api_key').value='fixture-only';grouped.nodes['#connection-source-group'].value='key-d';grouped.nodes['#connection-source-group'].onchange();
+ assert.equal(grouped.field('api_key').value,'');assert.equal(grouped.field('base_url').value,'https://api.openai.com/v1');
+ grouped.nodes['#connection-source-group'].value='';grouped.nodes['#connection-source-group'].onchange();
+ assert.equal(grouped.nodes['#connection-credential-label'].hidden,true);assert.equal(grouped.field('platform').disabled,false);
+ grouped.nodes['#connection-source-new'].onclick();assert.equal(grouped.nodes['#connection-saved-source-label'].hidden,true);
+ grouped.context.mockApi=async(_,body)=>{sent=body;return {models:[]}};vm.runInContext('api=mockApi',grouped.context);await grouped.context.wizardApi.discover();assert.ok(!sent.credential_source_id,'new vendor never inherits the previous saved secret');
+ assert.doesNotMatch(fs.readFileSync(path.join(root,'public/connections.js'),'utf8'),/connection-vendor-grid|connection-vendor-card|drawVendors/,'card wall removed from DOM generation');
+ const w=wizard();
+ assert.equal(w.nodes['#connection-platform-pane'].hidden,false,'vendor is the first page');
+ assert.equal(w.nodes['#connection-type-pane'].hidden,true);
+ assert.deepEqual([...w.field('platform').options].sort(),presets.map(p=>p.id).sort(),'all vendors shown before choosing output type');
+ let requests=0;
+ w.context.catalog={models:[{id:'text-one',model_kinds:['chat'],protocol:'openai_chat'},{id:'image-one',model_kinds:['image'],protocol:'openai_image'},{id:'video-one',model_kinds:['video'],protocol:'openai_video'},{id:'unknown-one',model_kinds:[],protocol:null}]};
+ w.context.mockApi=async()=>{requests++;return w.context.catalog};vm.runInContext('api=mockApi',w.context);
+ await w.context.wizardApi.discover();
+ assert.equal(w.nodes['#connection-model-pane'].hidden,false);
+ assert.ok(w.nodes['#connection-model-select'].innerHTML.includes('text-one'));
+ assert.ok(!w.nodes['#connection-model-select'].innerHTML.includes('image-one'));
+ w.field('api_key').value='fixture-only';const base=w.field('base_url').value;
+ w.choose('text-one');assert.equal(w.field('model').value,'text-one');
+ w.type('image');assert.equal(w.field('model').value,'');assert.equal(w.field('base_url').value,base);assert.equal(w.field('api_key').value,'fixture-only');
+ assert.equal(requests,1,'switching output type reuses catalog');
+ assert.ok(w.nodes['#connection-model-select'].innerHTML.includes('image-one'));w.choose('image-one');assert.equal(w.field('protocol').value,'openai_image');
+ w.type('audio');assert.ok(w.nodes['#connection-model-list'].innerHTML.includes('connection-list-empty'));
+ w.nodes['#connection-show-unknown'].checked=true;w.nodes['#connection-show-unknown'].onchange();w.choose('unknown-one');assert.equal(w.nodes['#connection-unknown-confirm'].hidden,false);assert.equal(w.nodes['#connection-primary'].disabled,true);
+ w.field('platform').value='deepseek';w.field('platform').onchange();assert.equal(w.field('api_key').value,'');assert.equal(w.field('model').value,'');
+ const failed=wizard();failed.context.mockApi=async()=>{throw Error('401 Invalid token')};vm.runInContext('api=mockApi',failed.context);await failed.context.wizardApi.discover();assert.equal(failed.nodes['#connection-platform-pane'].hidden,false);assert.ok(failed.nodes['#connection-error'].textContent.includes('401'));
+ const stale=wizard();let resolve;stale.context.mockApi=()=>new Promise(r=>resolve=r);vm.runInContext('api=mockApi',stale.context);const task=stale.context.wizardApi.discover(); // submit handler intentionally doesn't await
+ stale.field('base_url').value='https://different.example/v1';stale.field('base_url').oninput();resolve({models:[{id:'stale',model_kinds:['chat']}]});await task;assert.ok(!stale.nodes['#connection-model-select'].innerHTML.includes('stale'));
+ console.log('PASS vendor-first flow, mixed catalog dropdown, no refetch/type mutation, unknown guard, failed discovery, stale response and key isolation');
+})().catch(e=>{console.error(e);process.exitCode=1});

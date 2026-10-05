@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const nodes={};const ctx=vm.createContext({console,document:{querySelector:s=>nodes[s]||(nodes[s]={innerHTML:''}),querySelectorAll:()=>[]}});
+for(const file of ['app.js','connections.js','project-manager.js'])vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../public',file),'utf8').split("document.addEventListener('click'")[0],ctx);
+vm.runInContext(`connectionPlatforms=[{id:'custom',name:'Custom'}];state.providers=[{id:'a',platform:'custom',base_url:'https://a.example/v1',name:'image-a',model:'image-a',kind:'image',protocol:'openai_image'},{id:'b',platform:'custom',base_url:'https://b.example/v1',name:'video-b',model:'video-b',kind:'video',protocol:'openai_video'},{id:'c',platform:'custom',base_url:'https://b.example/v1',name:'<unsafe>',model:'text-c',kind:'chat',protocol:'openai_chat'}];renderSettings()`,ctx);
+assert.match(nodes['#connection-rows'].innerHTML,/image-a/);assert.doesNotMatch(nodes['#connection-rows'].innerHTML,/video-b|text-c/);
+const visibleText=nodes['#page'].innerHTML.replace(/<[^>]*>/g,'');assert.doesNotMatch(visibleText,/https?:\/\//);assert.match(visibleText,/来源 1/);assert.match(visibleText,/来源 2/);
+vm.runInContext("connectionView.source='https://b.example/v1';renderSettings()",ctx);
+assert.doesNotMatch(nodes['#connection-rows'].innerHTML,/image-a/);assert.match(nodes['#connection-rows'].innerHTML,/video-b/);assert.match(nodes['#connection-rows'].innerHTML,/&lt;unsafe&gt;/);
+vm.runInContext("connectionView.filter='video';renderSettings()",ctx);assert.doesNotMatch(nodes['#connection-rows'].innerHTML,/text-c/);
+vm.runInContext("connectionView.query='no match';renderSettings()",ctx);assert.match(nodes['#connection-rows'].innerHTML,/没有匹配/);
+console.log('PASS source-only model display, type and keyword filters, escaped labels');

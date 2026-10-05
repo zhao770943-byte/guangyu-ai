@@ -40,8 +40,11 @@ def init():
         conn.execute('PRAGMA journal_mode=WAL')
         conn.executescript('CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,created_at TEXT NOT NULL,payload TEXT NOT NULL);CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,payload TEXT NOT NULL);')
         conn.execute('CREATE TABLE IF NOT EXISTS storyboards(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,payload TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS workspace_items(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,payload TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS visual_projects(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,payload TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS novel_projects(id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,payload TEXT NOT NULL)')
 def put(table, obj):
-    if table not in ('providers','jobs','conversations','storyboards'): raise ValueError('unknown table')
+    if table not in ('providers','jobs','conversations','storyboards','visual_projects','workspace_items','novel_projects'): raise ValueError('unknown table')
     payload = json.dumps(obj, ensure_ascii=False)
     with LOCK, connect() as conn:
         if table == 'providers': conn.execute('INSERT OR REPLACE INTO providers VALUES (?,?)',(obj['id'],payload))
@@ -49,11 +52,11 @@ def put(table, obj):
         else: conn.execute(f'INSERT OR REPLACE INTO {table} VALUES (?,?,?)',(obj['id'],obj['updated_at'],payload))
     return obj
 def get(table, identity):
-    if table not in ('providers','jobs','conversations','storyboards'): raise ValueError('unknown table')
+    if table not in ('providers','jobs','conversations','storyboards','visual_projects','workspace_items','novel_projects'): raise ValueError('unknown table')
     with connect() as conn: row = conn.execute(f'SELECT payload FROM {table} WHERE id=?',(identity,)).fetchone()
     return json.loads(row['payload']) if row else None
 def items(table, limit=200):
-    order = {'providers':'rowid','jobs':'created_at','conversations':'updated_at','storyboards':'updated_at'}[table]
+    order = {'providers':'rowid','jobs':'created_at','conversations':'updated_at','storyboards':'updated_at','visual_projects':'updated_at','workspace_items':'updated_at','novel_projects':'updated_at'}[table]
     with connect() as conn: rows = conn.execute(f'SELECT payload FROM {table} ORDER BY {order} DESC LIMIT ?',(limit,)).fetchall()
     return [json.loads(r['payload']) for r in rows]
 def delete_provider(identity):

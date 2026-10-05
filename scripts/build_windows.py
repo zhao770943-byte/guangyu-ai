@@ -23,6 +23,21 @@ BUILD = ROOT / 'build'
 VERSION = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
 
 
+def public_documentation(root=ROOT):
+    """Only ship reviewed documents; local trial reports must stay local."""
+    entries = json.loads((root / 'scripts' / 'public-documents.json').read_text(encoding='utf-8'))
+    paths = []
+    for entry in entries:
+        path = (root / entry).resolve()
+        relative = path.relative_to(root.resolve())
+        if relative.parts[0] != 'docs' or path.suffix.lower() not in ('.md', '.jpg', '.png'):
+            raise ValueError('Invalid public documentation path: ' + entry)
+        if not path.is_file():
+            raise FileNotFoundError('Missing public documentation: ' + entry)
+        paths.append(path)
+    return paths
+
+
 def dependency_license(package, target):
     distribution = importlib.metadata.distribution(package)
     files = [p for p in distribution.files or [] if '.dist-info/licenses/' in str(p).replace('\\', '/')]
@@ -65,18 +80,17 @@ def build():
     for name in ('LICENSE', 'README.md', '使用说明.md', '设计与接入方案.md', '验收记录.md',
                  'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'VERSION'):
         shutil.copy2(ROOT / name, bundle / name)
-    for path in (ROOT / 'docs').rglob('*'):
-        if path.is_file() and path.suffix.lower() in ('.md', '.jpg', '.png'):
-            target = bundle / path.relative_to(ROOT)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+    for path in public_documentation():
+        target = bundle / path.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
     (bundle / '停止光屿AI.cmd').write_bytes(
         '@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\nstart "" /wait "%~dp0GuangyuAI.exe" --stop\r\n'.encode('utf-8'))
     (bundle / '开始使用.txt').write_text(
         '光屿 AI ' + VERSION + '\n\n'
         '1. 完整解压压缩包，保留 _internal 文件夹。\n'
         '2. 双击 GuangyuAI.exe，浏览器自动打开本机网页。无需安装 Python。\n'
-        '3. 在模型接入中先选文本、音频、图像或视频，再选厂商，填写 Key 并一键获取对应型号。\n'
+        '3. 在模型接入中先连接厂商并读取目录，再下拉选择模型类型与型号；已有来源可复用密钥。\n'
         '4. 关闭网页后服务继续运行；需要停止时双击 停止光屿AI.cmd。\n\n'
         '数据保存在程序旁的 data 文件夹，分享程序时不要分享 data。\n'
         '请解压到有写权限的普通文件夹，不要直接在压缩包中运行。\n'

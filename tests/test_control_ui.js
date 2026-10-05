@@ -1,0 +1,25 @@
+// Exercise role editing without writing the user's actual team configuration.
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const root=path.resolve(__dirname,'../public');
+const input=[{dataset:{roleProvider:'director'},value:'second'},{dataset:{roleNote:'writer'},value:'Keep reference style'},{dataset:{roleVision:'costume'},checked:true}];
+const elements={'#team-save':{},'#team-save-state':{}};
+const ctx=vm.createContext({console,setTimeout,window:{addEventListener(){}},document:{querySelector:s=>elements[s],querySelectorAll:()=>input}});
+for(const file of ['connections.js','app.js','ai-control.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8').split("document.addEventListener('click'")[0],ctx);
+vm.runInContext(`state.providers=[{id:'first',platform:'custom',base_url:'https://a.example/v1',kind:'chat',name:'A',model:'model-a'},{id:'second',platform:'custom',base_url:'https://b.example/v1',kind:'chat',name:'B',model:'model-b'},{id:'image',kind:'image',name:'Excluded',model:'picture'}];
+controlView.data={config:{version:1,roles:Object.fromEntries(teamOrder.map(k=>[k,{provider_id:'',note:'',vision:false}]))},roles:Object.fromEntries(teamOrder.map(k=>[k,{name:teamLabels[k],task:'Task'}])),usage:Object.fromEntries(teamOrder.map(k=>[k,{requests:0,reported_tokens:0,unreported:0}]))};
+renderControl=()=>{};toast=()=>{};`,ctx);
+const html=vm.runInContext('controlTeam(controlView.data)',ctx);
+assert.equal((html.match(/data-role-provider=/g)||[]).length,6);
+assert.match(html,/<optgroup label="自定义平台 · 来源 1">/);
+assert.match(html,/<optgroup label="自定义平台 · 来源 2">/);
+assert.doesNotMatch(html,/https:\/\/[ab]\.example/);
+assert.doesNotMatch(html,/Excluded/);
+vm.runInContext('bindControlTeam()',ctx);
+input.forEach(x=>x.oninput());
+assert.equal(vm.runInContext('controlView.data.config.roles.director.provider_id',ctx),'second');
+assert.equal(vm.runInContext('controlView.data.config.roles.writer.note',ctx),'Keep reference style');
+assert.equal(vm.runInContext('controlView.data.config.roles.costume.vision',ctx),true);
+let saved;
+ctx.mockApi=async(url,payload)=>{assert.equal(url,'/api/ai-control/save');saved=payload;return {...payload,version:2}};
+vm.runInContext('api=mockApi',ctx);
+(async()=>{await elements['#team-save'].onclick();assert.equal(saved.roles.director.provider_id,'second');assert.equal(vm.runInContext('controlView.dirty',ctx),false);console.log('PASS six-role layout, source-grouped text options, provider/note/vision editing and versioned save')})().catch(e=>{console.error(e);process.exitCode=1});

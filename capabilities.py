@@ -5,9 +5,9 @@ import copy
 
 FLAGS = ('reference_images', 'first_frame', 'last_frame', 'negative_prompt', 'seed',
          'aspect_ratio', 'quality', 'batch', 'background', 'resolution', 'camera',
-         'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale')
+         'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale', 'instructions')
 PARAMETERS = ('negative_prompt', 'seed', 'aspect_ratio', 'quality', 'n', 'background',
-              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale')
+              'resolution', 'camera', 'motion', 'strength', 'audio', 'voice', 'speed', 'output_format', 'output_compression', 'style', 'fps', 'guidance_scale', 'instructions')
 VARIABLES = {flag: ('n' if flag == 'batch' else flag) for flag in FLAGS}
 
 
@@ -65,8 +65,15 @@ def effective(provider):
         caps['first_frame'] = True
     elif kind == 'image' and protocol == 'minimax_image':
         caps.update(aspect_ratio=True,batch=True)
+    elif kind == 'audio' and protocol == 'cosyvoice_speech':
+        caps.update(voice=True,instructions=True,speed=True,seed=True)
+    elif kind == 'audio' and protocol == 'qwen_speech':
+        caps['voice'] = True
+        caps['instructions'] = model.startswith('qwen3-tts-instruct-flash')
     elif kind == 'audio' and protocol in ('openai_speech','minimax_speech'):
         caps.update(voice=True,speed=True)
+        if protocol == 'minimax_speech':
+            caps['style'] = True
     return caps
 
 
@@ -147,11 +154,14 @@ def validate_job(provider, input_assets, parameters, size='auto'):
             if type(value) is not bool:
                 raise ValueError('音频开关必须为布尔值。')
         else:
-            if not isinstance(value, str) or len(value) > (4000 if key == 'negative_prompt' else 160):
+            if not isinstance(value, str) or len(value) > (4000 if key == 'negative_prompt' else 1600 if key == 'instructions' else 160):
                 raise ValueError(key + ' 参数无效或过长。')
             if key == 'aspect_ratio' and not re.fullmatch(r'[1-9]\d?:[1-9]\d?', value):
                 raise ValueError('宽高比格式应为 16:9 或 1:1。')
         clean[key] = value
+    if provider.get('protocol') == 'minimax_speech' and 'style' in clean:
+        if clean['style'] not in ('neutral','happy','sad','angry','fearful','disgusted','surprised'):
+            raise ValueError('语音情绪不受支持，请从情绪选项中选择。请求尚未发送。')
     if provider.get('protocol')=='minimax_image':
         ratios=('1:1','16:9','4:3','3:2','2:3','3:4','9:16')+(() if provider.get('model')=='image-01-live' else ('21:9',))
         if clean.get('aspect_ratio','1:1') not in ratios or clean.get('n',1)>9:raise ValueError('MiniMax 图像宽高比或张数不受支持，张数最多 9。')

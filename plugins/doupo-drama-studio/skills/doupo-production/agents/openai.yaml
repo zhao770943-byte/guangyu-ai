@@ -1,0 +1,9 @@
+interface:
+  display_name: "斗破漫剧制作"
+  short_description: "沿用第一集经验，检查定稿、分镜连续性、配音与交付，继续制作后续漫剧"
+  icon_small: "../../assets/icon.svg"
+  icon_large: "../../assets/icon.svg"
+  brand_color: "#C4944B"
+  default_prompt: "使用 $doupo-production 读取当前项目与已接受版本，先审核分镜、声音和待修问题，再继续制作本集。"
+policy:
+  allow_implicit_invocation: true

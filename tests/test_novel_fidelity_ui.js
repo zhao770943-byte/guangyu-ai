@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const ctx=vm.createContext({novelFresh:()=>({phase:'draft'}),novelStory:()=>'<div class="production-step-actions"></div>',novelScript:()=>'<div>script</div>',renderNovelStudio(){},productionView:{setup:1},novelView:{projects:[{id:'old',title:'前作<unsafe>'}]},esc:s=>String(s??'').replaceAll('<','&lt;'),autoCheckLabels:{}});
+vm.runInContext(fs.readFileSync('public/novel-fidelity.js','utf8'),ctx);
+assert.equal(vm.runInContext('novelFresh().production_preferences.version',ctx),1);
+const reuse=vm.runInContext('novelStory(novelFresh())',ctx);
+assert.ok(reuse.includes('fidelity-parent'));assert.ok(reuse.includes('前作&lt;unsafe>'));
+vm.runInContext('productionView.setup=2',ctx);
+assert.ok(vm.runInContext('novelStory(novelFresh())',ctx).includes('原著对白逐句对照'));
+assert.equal(vm.runInContext("novelStory({phase:'complete'})",ctx),'<div class="production-step-actions"></div>');
+const report=vm.runInContext(`fidelityDialogue({fidelity_report:{retained:2,omissions:[{}],issues:['<bad>'],reused_assets:3},plan:{dialogue_ledger:[{id:'d1',status:'omitted',text:'<原句>',reason:'非对白'}]}})`,ctx);
+assert.ok(report.includes('&lt;原句>'));assert.ok(report.includes('非对白'));assert.ok(report.includes('&lt;bad>'));
+assert.equal(vm.runInContext("fidelityDialogue({})",ctx),'');
+console.log('PASS fidelity defaults, source selector, explicit omission evidence and legacy compatibility');

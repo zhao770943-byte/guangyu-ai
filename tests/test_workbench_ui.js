@@ -6,14 +6,16 @@ const vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 const elements={};
 const context=vm.createContext({console,setTimeout,clearTimeout,
-  document:{querySelector:selector=>elements[selector],querySelectorAll:()=>[]},
+  document:{querySelector:selector=>elements[selector],querySelectorAll:()=>[],addEventListener(){}},
   FileReader:class {readAsDataURL(){this.result='data:image/png;base64,dGVzdA==';this.onload()}},
 });
 vm.runInContext(fs.readFileSync(path.join(root,'public/video-controls.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/connections.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/image-controls.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(root,'public/creator.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(root,'public/app.js'),'utf8').split("document.addEventListener('click'")[0],context);
 async function run(){
+  vm.runInContext('creative.data={collections:[],drafts:[],materials:[]}',context);
   for(const key of ['#page','#model-select','#prompt','#size-input','#seconds-input','#generation-form','#video-resolution','#video-request-preview'])elements[key]={setCustomValidity(){}};
   vm.runInContext(`state.page='video';state.providers=[{id:'h3',kind:'video',name:'Local H3',model:'minimax-h3-local-8gb',protocol:'comfy_h3',capabilities:{first_frame:true,last_frame:true,aspect_ratio:true,seed:true},video_controls:{mode:'aspect',ratios:[{value:'16:9',label:'Landscape',enabled:true,sizes:{}}],durations:[5],duration_enabled:true,custom_duration:false,custom_size:false,default_ratio:'16:9'}}];state.drafts.video.mode='text';state.drafts.video.seconds=30;state.drafts.video.size='1920x1080';renderStudio('video');`,context);
   assert.equal(vm.runInContext('state.drafts.video.mode',context),'first');
@@ -74,6 +76,11 @@ async function run(){
     await deleteWork(job.id);
     if(libraryWorks().length||currentJob('image')||state.detail||state.currentJob.image)throw Error('Deleted work remains selected');
   })()`,context);
-  console.log('PASS video controls, image parameter reset, output mismatch, delete confirmation/cancellation and selection cleanup');
+  elements['.material-local-grid']={innerHTML:''};
+  vm.runInContext(`creative.data.materials=[{id:'portrait',title:'角色 <hero>',assets:[{id:'portrait-image',url:'/uploads/portrait.png'}]},{id:'scene',title:'城市场景',assets:[{id:'scene-image',url:'/uploads/scene.png'}]}];materialView.query='角色';drawLocalMaterials(creative.data.materials)`,context);
+  assert.match(elements['.material-local-grid'].innerHTML,/&lt;hero&gt;/);assert.doesNotMatch(elements['.material-local-grid'].innerHTML,/城市场景/);
+  vm.runInContext(`materialView.query='missing';drawLocalMaterials(creative.data.materials)`,context);assert.match(elements['.material-local-grid'].innerHTML,/没有匹配/);
+  vm.runInContext(`materialView.query='';drawLocalMaterials(creative.data.materials)`,context);assert.match(elements['.material-local-grid'].innerHTML,/城市场景/);
+  console.log('PASS video controls, image parameter reset, output mismatch, delete selection cleanup and local material filtering');
 }
 run().catch(error=>{console.error(error);process.exitCode=1});

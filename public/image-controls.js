@@ -18,26 +18,23 @@ function imageCanvas(p){
   const o=imageOptions(p),d=state.drafts.image,ratio=imageRatio(p,d),level=imageLevel(p,d);
   const enabled=o.mode!=='none',pixels=['pixels','fixed','custom'].includes(o.mode);
   const choices=[{value:'auto',label:'模型默认'},...o.ratios];
-  const buttons=o.ratios.length?choices.map(r=>{
-    const shape=(r.value==='auto'?'1:1':r.value).replace(':','-');
-    return `<button type="button" class="canvas-ratio ${ratio===r.value?'active':''}" data-image-ratio="${r.value}" aria-pressed="${ratio===r.value}"><span class="canvas-ratio-icon"><i class="shape-${shape}"></i></span><b>${r.value==='auto'?'自动':r.value}</b><small>${r.label}</small></button>`;
-  }).join(''):[['auto','模型默认'],...o.sizes.map(v=>[v,v.replace('x',' × ')])].map(([v,label])=>`<button type="button" class="canvas-size ${d.size===v?'active':''}" data-image-size="${v}" ${enabled?'':'disabled'}>${label}</button>`).join('');
-  return `<div class="canvas-ratios" role="group" aria-label="图像画幅比例">${buttons}</div>
+  const control=o.ratios.length?`<label>比例<select id="image-ratio-select">${choices.map(r=>`<option value="${r.value}" ${ratio===r.value?'selected':''}>${r.value==='auto'?'模型默认':r.value+' · '+r.label}</option>`).join('')}${ratio==='custom'?'<option value="custom" selected>自定义</option>':''}</select></label>`:`<label>尺寸<select id="image-size-select" ${enabled?'':'disabled'}>${['auto',...o.sizes].map(v=>`<option value="${v}" ${d.size===v?'selected':''}>${v==='auto'?'模型默认':v}</option>`).join('')}</select></label>`;
+  return `${control}
     ${o.levels.length?`<label class="canvas-level">输出尺寸档位<select id="image-level" ${o.mode==='pixels'&&['auto','custom'].includes(ratio)?'disabled':''}><option value="" ${o.mode==='pixels'?'disabled':''}>${o.mode==='aspect'?'模型默认':ratio==='custom'?'自定义尺寸':ratio==='auto'?'先选择比例':'自定义尺寸'}</option>${o.levels.map(([v,label])=>`<option value="${v}" ${level===v?'selected':''}>${label}</option>`).join('')}</select></label>`:''}
     <div class="canvas-request"><span>${pixels?'实际请求尺寸':'尺寸由模型决定'}</span><strong id="image-size-preview">${pixels?esc(d.size==='auto'?'模型默认':d.size.replace('x',' × ')):esc([d.parameters.aspect_ratio||'默认比例',d.parameters.resolution||'默认分辨率'].join(' · '))}</strong></div>
     ${pixels?`<details class="pixel-editor" ${ratio==='custom'&&o.mode==='pixels'?'open':''}><summary>自定义像素尺寸</summary><label>宽 × 高<input id="size-input" value="${esc(d.size)}" placeholder="auto 或 864x1536" ${o.mode==='fixed'?'readonly':''}></label><p class="field-hint">${o.mode==='pixels'?'宽高须为 16 的倍数，最长边 ≤ 3840；总像素 0.66–8.29MP，比例不超过 3:1。':'当前模型尺寸以平台支持为准。'}</p></details>`:'<input id="size-input" type="hidden" value="auto">'}
     <p class="field-hint canvas-note">${o.mode==='pixels'?'平台名称是常用构图参考；比例会换算为上方像素尺寸。更大尺寸可能增加耗时和费用，超清档位为实验性。':o.mode==='fixed'?'此模型仅支持以上固定尺寸。抖音、B站等精确比例可切换 GPT Image 2 / 2.5 等支持多比例的模型。':o.mode==='aspect'?'比例直接传给模型，实际像素由接口返回；分辨率档位仅在模型支持时显示。':o.mode==='custom'?'此连接使用自定义尺寸，请按平台支持范围填写。':'当前连接未提供尺寸控制；自定义接口可在模型接入中映射尺寸或画幅比例。'}</p>`;
 }
-function refreshImageCanvas(){const p=chosen('image');$('#image-canvas-controls').innerHTML=imageCanvas(p);bindImageCanvas(p)}
+function refreshImageCanvas(){const p=chosen('image');$('#image-canvas-controls').innerHTML=imageCanvas(p);bindImageCanvas(p);if(typeof creatorParameterSummary==='function')creatorParameterSummary()}
 function bindImageCanvas(p){
   const d=state.drafts.image,o=imageOptions(p);
-  document.querySelectorAll('[data-image-ratio]').forEach(b=>b.onclick=()=>{
-    const ratio=b.dataset.imageRatio,level=imageLevel(p,d)||'standard';
+  const select=$('#image-ratio-select');if(select)select.onchange=()=>{
+    const ratio=select.value,level=imageLevel(p,d)||'standard';
     if(o.mode==='aspect'){d.parameters.aspect_ratio=ratio==='auto'?'':ratio;d.size='auto'}
-    else d.size=ratio==='auto'?'auto':o.ratios.find(r=>r.value===ratio).sizes[level];
+    else if(ratio!=='custom')d.size=ratio==='auto'?'auto':o.ratios.find(r=>r.value===ratio).sizes[level];
     refreshImageCanvas();
-  });
-  document.querySelectorAll('[data-image-size]').forEach(b=>b.onclick=()=>{d.size=b.dataset.imageSize;refreshImageCanvas()});
+  };
+  const sizeSelect=$('#image-size-select');if(sizeSelect)sizeSelect.onchange=()=>{d.size=sizeSelect.value;refreshImageCanvas()};
   const levels=$('#image-level');if(levels)levels.onchange=()=>{
     if(o.mode==='aspect')d.parameters.resolution=levels.value;
     else if(levels.value)d.size=o.ratios.find(r=>r.value===imageRatio(p,d)).sizes[levels.value];
@@ -58,7 +55,7 @@ function imageAdvancedFields(p){
     control('随机种子','seed',{type:'number',min:0,max:2147483647,step:1,placeholder:'随机'}),control('参考强度（0–1）','strength',{type:'number',min:0,max:1,step:.05}),
     imageOptions(p).mode!=='aspect'?control('输出分辨率','resolution',{choices:[['1K','1K'],['2K','2K'],['4K','4K']]}):''].filter(Boolean).join('');
   const unsupported=[['negative_prompt','负面提示词'],['seed','随机种子'],['strength','参考强度']].filter(([k])=>!c[k]).map(([,label])=>label);
-  return `<details class="advanced image-advanced" open><summary><span>${icon('sliders')} 高级参数</span>${icon('down')}</summary><div class="advanced-body"><button type="button" class="button secondary wide" data-action="reset-image-parameters">${icon('refresh')} 恢复默认参数</button><p class="field-hint">同时重置画幅和高级参数，保留画面描述与参考图；连接中设置的默认参数仍会生效。</p><div class="field-grid">${available}</div>${control('负面提示词','negative_prompt',{type:'textarea',placeholder:'不希望出现的元素'})}
+  return `<details class="advanced image-advanced"><summary><span>${icon('sliders')} 高级参数</span>${icon('down')}</summary><div class="advanced-body"><button type="button" class="button secondary wide" data-action="reset-image-parameters">${icon('refresh')} 恢复默认参数</button><p class="field-hint">同时重置画幅和高级参数，保留画面描述与参考图；连接中设置的默认参数仍会生效。</p><div class="field-grid">${available}</div>${control('负面提示词','negative_prompt',{type:'textarea',placeholder:'不希望出现的元素'})}
     <p class="field-hint" id="image-background-hint"></p><p class="field-hint" id="image-format-hint">仅 JPEG / WebP 可设置压缩；透明背景需用 PNG / WebP。留空沿用连接或模型默认值。</p>
     ${unsupported.length?`<details class="unsupported-controls"><summary>当前接口未提供的参数 · ${unsupported.length} 项</summary><p>${unsupported.join('、')}：${p?.protocol==='custom'?'尚未在自定义请求模板中映射。可前往模型接入配置。':'当前协议没有这些独立请求参数。可在画面描述中写清排除元素与参考要求；需要精确控制时请选择支持这些参数的模型。'}</p></details>`:''}
     <p class="field-hint">${p?`生成响应等待上限 ${p.effective_request_timeout||600} 秒，可在模型接入的高级配置中调整。大图、最高质量与透明背景可能需要更久。`:""}</p><p class="field-hint">画质档位取决于平台实现；max / xhigh 是扩展值，不保证比默认更好。风景、人物场景建议先用默认背景，透明仅用于抠图素材。</p></div></details>`;

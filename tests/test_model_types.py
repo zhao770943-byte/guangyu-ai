@@ -51,6 +51,8 @@ class MediaFixture(BaseHTTPRequestHandler):
         if self.path=='/v1/t2a_v2':
             if body['text']=='business-error':return self.send({'base_resp':{'status_code':1008,'status_msg':'insufficient fixture balance'}})
             return self.send({'base_resp':{'status_code':0},'data':{'audio':f'http://127.0.0.1:{self.server.server_port}/sample.wav'}})
+        if self.path=='/v1/services/aigc/multimodal-generation/generation':
+            return self.send({'output':{'audio':{'url':f'http://127.0.0.1:{self.server.server_port}/sample.wav'}}})
         raise AssertionError('Unexpected generation path: '+self.path)
 
 class ModelTypeTests(unittest.TestCase):
@@ -129,6 +131,57 @@ class ModelTypeTests(unittest.TestCase):
         j=self.job(self.config(kind='image',protocol='minimax_image',model='image-01'),parameters={'aspect_ratio':'16:9','n':2})
         self.assertEqual(j['status'],'succeeded',j.get('error'));self.assertEqual([c for c in MediaFixture.calls if c[0]=='POST'][-1][1],'/v1/image_generation')
         self.assertEqual(j['result']['assets'][0]['type'],'image')
+    def test_minimax_emotion_reaches_upstream(self):
+        j=self.job(self.config(protocol='minimax_speech',model='speech-2.8-hd'),prompt='谢谢你，<#0.18#>薰儿。',parameters={'voice':'male-qn-qingse','style':'sad'})
+        self.assertEqual(j['status'],'succeeded',j.get('error'))
+        body=[c for c in MediaFixture.calls if c[0]=='POST'][-1][2]
+        self.assertEqual(body['voice_setting']['emotion'],'sad')
+        self.assertEqual(body['text'],'谢谢你，<#0.18#>薰儿。')
+    def test_qwen_direction_is_separate_from_spoken_text(self):
+        cfg=self.config(protocol='qwen_speech',model='qwen3-tts-instruct-flash')
+        cfg['platform']='dashscope'
+        j=self.job(cfg,prompt='我相信你。',parameters={'voice':'Serena','instructions':'轻声安慰，句尾收稳。'})
+        self.assertEqual(j['status'],'succeeded',j.get('error'))
+        body=[c for c in MediaFixture.calls if c[0]=='POST'][-1][2]
+        self.assertEqual(body['input']['text'],'我相信你。')
+        self.assertEqual(body['input']['instructions'],'轻声安慰，句尾收稳。')
+        self.assertTrue(body['input']['optimize_instructions'])
+        self.assertTrue(j['result']['assets'][0]['local'])
+    def test_qwen_official_route_preserves_host_and_provider_base(self):
+        p={'protocol':'qwen_speech','base_url':'https://dashscope.aliyuncs.com/compatible-mode/v1'}
+        self.assertEqual(providers.endpoint(p,'/services/aigc/multimodal-generation/generation'),'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
+        self.assertEqual(p['base_url'],'https://dashscope.aliyuncs.com/compatible-mode/v1')
+    def test_qwen_plain_model_rejects_unsupported_direction(self):
+        cfg=self.config(protocol='qwen_speech',model='qwen3-tts-flash');cfg['platform']='dashscope'
+        p=self.api('/api/providers/save',cfg)
+        self.api('/api/jobs',{'provider_id':p['id'],'prompt':'fixture','parameters':{'instructions':'轻声安慰'}},status=400)
+        self.assertEqual(MediaFixture.calls,[])
+    def test_qwen_clone_uses_bound_voice_without_system_fallback(self):
+        cfg=self.config(protocol='qwen_speech',model='qwen3-tts-vc-2026-01-22',extra={'voice':'qwen-tts-vc-fixture'})
+        cfg['platform']='dashscope'
+        j=self.job(cfg,prompt='谢谢你。')
+        self.assertEqual(j['status'],'succeeded',j.get('error'))
+        body=[c for c in MediaFixture.calls if c[0]=='POST'][-1][2]
+        self.assertEqual(body['input']['voice'],'qwen-tts-vc-fixture')
+        self.assertNotIn('voice',body)
+        self.assertNotIn('instructions',body['input'])
+    def test_qwen_clone_without_voice_stops_before_paid_request(self):
+        p=self.config(protocol='qwen_speech',model='qwen3-tts-vc-2026-01-22');p['platform']='dashscope'
+        with self.assertRaisesRegex(ValueError,'复刻音色'):
+            providers.build(p,{'prompt':'fixture','parameters':{}})
+        self.assertEqual(MediaFixture.calls,[])
+    def test_qwen_clone_catalog_keeps_realtime_out_of_http_adapter(self):
+        p=self.config(protocol='openai_chat');p['platform']='dashscope'
+        rows,_=model_catalog._normalize([{'id':'qwen3-tts-vc-2026-01-22'},{'id':'qwen3-tts-vc-realtime-2026-01-15'}],'openai',p,'')
+        self.assertEqual(rows[0]['protocol'],'qwen_speech')
+        self.assertIsNone(rows[1]['protocol'])
+    def test_minimax_automatic_emotion_does_not_force_neutral(self):
+        self.job(self.config(protocol='minimax_speech',model='speech-2.8-hd'))
+        self.assertNotIn('emotion',[c for c in MediaFixture.calls if c[0]=='POST'][-1][2]['voice_setting'])
+    def test_bad_emotion_rejected_without_paid_request(self):
+        p=self.api('/api/providers/save',self.config(protocol='minimax_speech',model='speech-2.8-hd'))
+        self.api('/api/jobs',{'provider_id':p['id'],'prompt':'fixture','parameters':{'style':'comfort'}},status=400)
+        self.assertEqual(MediaFixture.calls,[])
     def test_minimax_business_failure_is_not_success_or_retried(self):
         j=self.job(self.config(protocol='minimax_speech',model='speech-02-hd'),prompt='business-error')
         self.assertEqual(j['status'],'failed');self.assertIn('insufficient',j['error'])

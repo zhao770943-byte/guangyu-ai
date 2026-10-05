@@ -206,6 +206,8 @@ def build_report(jobs=None, providers=None, period='7d', now=None, request_limit
         models[key] = {**info, 'connected': True, 'historical': False, **_empty_metrics()}
     selected = []
     for job in jobs:
+        if job.get('film_batch'):
+            continue  # Local assembly is not another provider request.
         stamp = _datetime(job.get('created_at'))
         if stamp is None:
             if period != 'all':

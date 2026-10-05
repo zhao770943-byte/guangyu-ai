@@ -1,4 +1,6 @@
-/* Type, vendor, then model: each step has one clear purpose. */
+/* Connect vendor first, then choose output type and model from its catalog. */
+.connection-reuse{grid-column:1/-1;background:#f2f7f4;border:1px solid #dbe7de;padding:14px;border-radius:9px}.connection-reuse small{font-size:11px;color:#74857a;margin-top:7px;display:block}
+.connection-output-select,.connection-model-dropdown{display:block;font-size:12px;color:#53655a;margin:0 0 18px}.connection-output-select select,.connection-model-dropdown select{width:100%;margin-top:8px;min-height:44px;background:#fafcf9}.connection-model-dropdown select{font-weight:600}.connection-list-status{font-size:11px;color:#819085;margin:0}#connection-model-list:has(.connection-list-status){flex:none;min-height:0;border:0;padding:0}.connection-model-browser{min-height:340px}
 .connection-vendor-search{position:relative}.connection-vendor-search>.icon{position:absolute;top:11px;left:11px;width:17px;color:#8190a8}#provider-form .connection-vendor-search input{padding-left:36px;margin:0}
 .connection-vendor-grid{max-height:230px;overflow:auto;scrollbar-width:thin;border:1px solid #e3e8f1;border-radius:9px;padding:12px;background:#f9fafc;margin-bottom:15px}
 .connection-vendor-group+ .connection-vendor-group{margin-top:14px}.connection-vendor-group h4{margin:0 0 8px;font-size:11px;color:#6d7c91;display:flex;gap:8px}.connection-vendor-group h4 span{font-weight:400}.connection-vendor-group>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}

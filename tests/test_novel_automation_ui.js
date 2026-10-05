@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const ctx=vm.createContext({novelFresh:()=>({phase:'draft'}),novelStory:()=>'<label class="production-check"><input id="production-review">人工审核</label><section class="production-quality-settings">old</section><div class="production-step-actions"></div>',renderNovelStudio(){},novelDefaultTab:()=> 'script',novelToolbar:()=> '开始解析与编剧',productionHint:()=>['manual',''],deskOverview:()=> 'legacy',novelPhases:{},productionReadiness:()=>[],deskChecks:{identity:'人物'},productionView:{setup:0},novelView:{tab:'story'},esc:s=>String(s??'').replaceAll('<','&lt;'),novelModels:()=>'<option value="">选择模型连接</option>'});
+vm.runInContext(fs.readFileSync('public/novel-automation.js','utf8'),ctx);
+assert.equal(vm.runInContext('novelFresh().automation.enabled',ctx),true);
+assert.equal(vm.runInContext('novelFresh().request_limit',ctx),240);
+assert.equal(vm.runInContext('productionReadiness(novelFresh())[0].ok',ctx),false);
+assert.equal(vm.runInContext("novelDefaultTab('auto_shots_review')",ctx),'overview');
+assert.equal(vm.runInContext("deskOverview({phase:'complete'})",ctx),'legacy');
+assert.ok(vm.runInContext('novelStory(novelFresh())',ctx).includes('自动制片'));
+vm.runInContext('productionView.setup=2',ctx);
+const html=vm.runInContext('novelStory(novelFresh())',ctx);
+assert.ok(html.includes('shot_target'));assert.ok(html.includes('剧本最多返修'));assert.ok(!html.includes('production-review'));assert.ok(!html.includes('production-quality-settings'));
+assert.equal(vm.runInContext('novelToolbar(novelFresh())',ctx),'启动自动制片');
+const report=vm.runInContext(`autoReport({phase:'auto_script_review',request_limit:240,automation_status:{reports:[{kind:'script',target:'<x>',verdict:'revise',checks:{},evidence:{},issues:'<script>',suggestion:'修改',fingerprint:'abcd',time:'today'}]}})`,ctx);
+assert.ok(report.includes('&lt;script>'));assert.ok(report.includes('需修订'));assert.ok(!report.includes('<script>'));
+console.log('PASS automatic/manual setup, new-phase routing, limits, report escaping and legacy preservation');

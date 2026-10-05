@@ -4,7 +4,10 @@ import hashlib
 import http.client
 import ipaddress
 import socket
+import ssl
 import time
+import urllib.request
+import urllib.error
 from urllib.parse import urlsplit, urljoin
 import storage
 
@@ -48,13 +51,64 @@ def connection(url, provider):
     cls=http.client.HTTPSConnection if parsed.scheme=='https' else http.client.HTTPConnection
     conn=cls(host,port,timeout=15)
     # Pin the validated address; HTTPS still verifies the original hostname.
-    conn._create_connection=lambda address,timeout,source_address=None: socket.create_connection((addresses[0][4][0],port),timeout,source_address)
+    def connect_validated(address, timeout, source_address=None):
+        last_error = None
+        for candidate in addresses:
+            try:
+                return socket.create_connection((candidate[4][0], port), timeout, source_address)
+            except OSError as exc:
+                last_error = exc
+        raise last_error
+    conn._create_connection=connect_validated
+    if parsed.scheme=='https':
+        original_connect=conn.connect
+        def connect_https():
+            last_error=None
+            for candidate in addresses:
+                conn._create_connection=lambda address,timeout,source_address=None: socket.create_connection((candidate[4][0],port),timeout,source_address)
+                try:
+                    original_connect()
+                    return
+                except ssl.SSLCertVerificationError:
+                    conn.close()
+                    raise
+                except OSError as exc:
+                    conn.close()
+                    last_error=exc
+            raise last_error
+        conn.connect=connect_https
     return conn,parsed
 
 def download(asset, job, index):
     url=asset['url'];deadline=time.monotonic()+MAX_SECONDS
     temp=None
     try:
+        # This provider CDN is reachable through the user's existing system proxy.
+        # Keep the exception narrow: public HTTPS image host, no credentials or redirects.
+        parsed = urlsplit(url)
+        if asset['type'] == 'image' and parsed.scheme == 'https' and parsed.hostname == 'media.lensapi.cn' and urllib.request.getproxies().get('https'):
+            validated, _ = connection(url, {})
+            validated.close()
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *args):
+                    raise SaveError('代理下载发生重定向，请核对原作品地址。')
+            try:
+                opener = urllib.request.build_opener(NoRedirect())
+                with opener.open(urllib.request.Request(url, headers={'Accept':'image/*','User-Agent':'GuangyuAI-MediaStore'}), timeout=15) as response:
+                    if response.status != 200:
+                        raise SaveError('原平台图片下载未成功。')
+                    raw = response.read(10*1024*1024+1)
+                    if len(raw)>10*1024*1024:
+                        raise SaveError('代理图片超过 10 MiB 上限。')
+                ext = extension(raw[:64], 'image')
+                name = job['id']+'-'+hashlib.sha256((str(index)+url).encode()).hexdigest()[:16]+'.'+ext
+                path = storage.DATA/'media'/name;temp=path.with_suffix('.partial')
+                temp.write_bytes(raw);temp.replace(path)
+                return {**asset,'url':'/media/'+name,'source_url':url,'local':True,'saved_at':storage.now(),'bytes':len(raw),'save_error':None}
+            except urllib.error.URLError as exc:
+                if isinstance(exc.reason, ssl.SSLCertVerificationError):
+                    raise SaveError('媒体服务器证书验证失败。') from exc
+                # An unavailable proxy can still fall back to validated direct HTTPS.
         for hop in range(6):
             conn,parsed=connection(url,job.get('provider_snapshot',{}))
             try:

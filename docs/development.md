@@ -27,7 +27,11 @@ py -3 -m venv .venv
 | `storage.py` | SQLite 和 Windows DPAPI |
 | `usage.py` | 本机用量聚合与 CSV |
 | `public/` | 原生 HTML、CSS、JavaScript |
-| `public/connections.js` / `public/connections.css` | 模型管理表格、类型、厂商、型号三步接入向导与按需展开的高级配置 |
+| `public/connections.js` / `public/connections.css` | 按来源管理、厂商目录读取、模型类型与型号下拉以及高级配置 |
+| `novel_studio.py` / `novel_automation.py` | 小说持久化调度与有界自动制片 |
+| `novel_fidelity.py` / `production_book.py` / `production_readiness.py` | 对白、连续性、审核与制作待办 |
+| `ai_control.py` | 六 AI 角色配置与项目快照 |
+| `visual_studio.py` / `visual_film.py` | 节点画布与分段视频 |
 | `tests/` | 单元测试与隔离 HTTP 模拟接口 |
 
 协议适配时同时更新能力声明、请求构建、响应提取与用量字段。所有新增生成行为应由用户主动发起；不要因为临时网络失败自动重试付费 POST。
@@ -45,11 +49,10 @@ py -3 -m venv .venv
 前端交互回归（离线状态与 DOM 契约，不代表浏览器视觉验收）：
 
 ```powershell
-node tests/test_workbench_ui.js
-node tests/test_connection_wizard.js
-node tests/test_storyboards_ui.js
-node tests/test_storyboards_form.js
-node tests/test_library_picker.js
+Get-ChildItem tests/test_*.js | Sort-Object Name | ForEach-Object {
+    node $_.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Frontend check failed: $($_.Name)" }
+}
 ```
 
 ## Windows 便携构建
@@ -61,7 +64,7 @@ node tests/test_library_picker.js
 .\.venv\Scripts\python.exe scripts/build_windows.py
 ```
 
-构建脚本生成 `dist/` 中的发布 ZIP。应用使用目录分发形式，用户需要完整保留 `GuangyuAI.exe` 和 `_internal/`。最终名称和校验文件以脚本输出及 GitHub Release 为准；不要把 `data/`、开发环境或测试工作目录打包进去。
+构建脚本生成 `dist/` 中的发布 ZIP。`scripts/public-documents.json` 明确列出可分发文档，新增公开文档需更新该清单；未列出的本机试制记录不会进入安装包。应用使用目录分发形式，用户需要完整保留 `GuangyuAI.exe` 和 `_internal/`。最终名称和校验文件以脚本输出及 GitHub Release 为准；不要把 `data/`、开发环境或测试工作目录打包进去。
 
 发布前应实际解压 ZIP 到独立目录，核对无用户数据，再使用包内 EXE 验证启动、健康接口、停止、图片上传和重启后数据保留。仅构建命令成功不代表应用可运行。模拟接口结果不代表任何真实平台账户有调用权限。
 

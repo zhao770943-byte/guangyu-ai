@@ -12,7 +12,7 @@ function sbJob(id){return storyboardView.board?.jobs?.find(j=>j.id===id)}
 function sbAsset(j){return !j?.work_deleted_at&&j?.status==='succeeded'?j.result?.assets?.find(a=>a.type==='image'&&a.local):null}
 function sbCanReference(){return state.providers.find(p=>p.id===storyboardView.board?.provider_id)?.capabilities?.reference_images}
 function sbMerge(board){for(const j of board.jobs||[]){state.jobs=state.jobs.filter(x=>x.id!==j.id);state.jobs.unshift(j)}storyboardView.board=board}
-async function sbOpen(){storyboardView.open=true;renderStudio('video')}
+async function sbOpen(){storyboardView.open=false;go('visual')}
 async function sbLoad(id){
  storyboardView.loading=true;storyboardView.error='';renderStoryboards();
  try{storyboardView.projects=(await api('/api/storyboards')).boards;const chosenId=id||storyboardView.projects[0]?.id;sbMerge(chosenId?await api('/api/storyboards?id='+encodeURIComponent(chosenId)):sbFresh());storyboardView.dirty=false;storyboardView.pending=null;storyboardView.stage=storyboardView.board.master_upload_id?'shots':'master'}
