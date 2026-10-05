@@ -2,9 +2,9 @@
 
 **在自己的电脑上连接模型 API，把小说、参考图和创意组织成可审核、可续作的影像项目。**
 
-当前主分支为 **3.2.0**。光屿是面向个人的中文 AIGC 工作台：小说改编、六 AI 协作、定稿与分镜画布、图像／视频／声音创作、作品库和模型用量集中在本机管理。浏览器打开界面，SQLite 和媒体文件保存在电脑上。
+当前主分支为 **3.2.1**。光屿是面向个人的中文 AIGC 工作台：小说改编、六 AI 协作、定稿与分镜画布、图像／视频／声音创作、作品库和模型用量集中在本机管理。浏览器打开界面，SQLite 和媒体文件保存在电脑上。
 
-[3.2.0 更新说明](docs/release-v3.2.0.md) · [使用说明](使用说明.md) · [制作流程](docs/production-workbench.md) · [下载已发布安装包](https://github.com/zhao770943-byte/guangyu-ai/releases) · [提交问题](https://github.com/zhao770943-byte/guangyu-ai/issues)
+[3.2.1 更新说明](docs/release-v3.2.1.md) · [使用说明](使用说明.md) · [制作流程](docs/production-workbench.md) · [下载已发布安装包](https://github.com/zhao770943-byte/guangyu-ai/releases) · [提交问题](https://github.com/zhao770943-byte/guangyu-ai/issues)
 
 主分支源码与已发布安装包可能版本不同。每次主分支推送会触发 [Windows 构建](https://github.com/zhao770943-byte/guangyu-ai/actions/workflows/windows-release.yml)；只有构建、测试和便携运行检查均通过后才提供该次构建的下载产物。现有 Release 不会自动更新。
 
@@ -65,6 +65,8 @@ py -3 -m venv .venv
 厂商预设覆盖国内外模型原厂、托管平台与本机服务。模型目录按所选来源读取，目录可见不代表当前密钥有生成权限或余额。模型输出类型与协议分别检查；可理解图片的语言模型不因此成为生图模型。
 
 支持已适配的 OpenAI、Anthropic、Gemini、MiniMax、方舟等协议，以及自定义 JSON 请求与轮询映射。专有鉴权、上传、WebSocket 等可能需要额外适配；不保证任意平台只填 URL 即可生成。具体能力见 [接口接入指南](docs/providers.md) 与 [厂商目录](docs/provider-selection.md)。
+
+外部 HTTPS 模型请求默认使用系统代理，本地模型始终直连；详见 [网络与系统代理](docs/provider-network.md)。
 
 默认仅监听 `127.0.0.1:8786`。API Key 在后端使用当前 Windows 用户的 DPAPI 加密，界面不会回显密钥。用户主动运行模型任务时，相关原文、提示词和参考素材会发送给所选模型服务。
 

@@ -14,7 +14,7 @@ import visual_film, film_plan, film_queue, film_compose
 import providers, storage, capabilities, uploads, usage, model_catalog, media_store, work_library, storyboards, visual_studio
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-VERSION = '3.2.0'
+VERSION = '3.2.1'
 PORT = int(os.environ.get('GUANGYU_PORT','8786'))
 ORIGIN = f'http://127.0.0.1:{PORT}'
 CSRF = secrets.token_urlsafe(32)

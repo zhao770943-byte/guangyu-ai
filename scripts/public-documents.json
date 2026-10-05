@@ -12,6 +12,7 @@
   "docs/novel-production.md",
   "docs/production-workbench.md",
   "docs/provider-catalog.md",
+  "docs/provider-network.md",
   "docs/provider-selection.md",
   "docs/providers.md",
   "docs/release-v2.1.0.md",
@@ -21,6 +22,7 @@
   "docs/release-v2.3.0.md",
   "docs/release-v2.3.1.md",
   "docs/release-v3.2.0.md",
+  "docs/release-v3.2.1.md",
   "docs/storyboards.md",
   "docs/visual-studio.md"
 ]
